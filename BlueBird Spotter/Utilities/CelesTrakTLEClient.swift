@@ -1,5 +1,5 @@
 //
-//  CelesTrakTLEClinet.swift
+//  CelesTrakTLEClient.swift
 //  BlueBird Spotter
 //
 //  Created by Tom Dobson on 12/19/25.
@@ -7,7 +7,7 @@
 
 import Foundation
 
-actor CelesTrakTLE: CelesTrakTLEService {
+actor CelesTrakTLEClient: CelesTrakTLEService {
     private let session: URLSession
 
     init(session: URLSession = .shared) {
@@ -34,9 +34,10 @@ actor CelesTrakTLE: CelesTrakTLEService {
 
         let text = String(decoding: data, as: UTF8.self)
         let tles = try Self.parseTLEText(text)
+        let filtered = TLEFilter.excludeDebris(from: tles)
 
-        guard !tles.isEmpty else { throw CelesTrakError.emptyBody }
-        return tles
+        guard !filtered.isEmpty else { throw CelesTrakError.emptyBody }
+        return filtered
     }
 
     // MARK: - Parsing
@@ -82,9 +83,7 @@ actor CelesTrakTLE: CelesTrakTLEService {
                     throw CelesTrakError.malformedTLE(atLine: i + 2, context: "Expected line 2 to start with '2 '")
                 }
 
-                if !name.uppercased().contains("DEB") {
-                    results.append(TLE(name: name, line1: line1, line2: line2))
-                }
+                results.append(TLE(name: name, line1: line1, line2: line2))
                 i += 3
             }
         }

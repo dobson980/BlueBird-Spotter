@@ -22,6 +22,7 @@
 - UI tests use XCTest in `BlueBird SpotterUITests/`, with methods prefixed `test...`.
 - No coverage thresholds are configured; keep new logic covered when practical.
 - Build the app after each change (`xcodebuild -scheme "BlueBird Spotter" build`) to verify changes compile.
+- Run unit tests whenever you add or update tests or change logic they cover (`xcodebuild -scheme "BlueBird SpotterTests" test -destination 'platform=iOS Simulator,name=iPhone 15'`).
 - Add or update unit tests for new features and logic where it makes sense to validate behavior.
 
 ## Commit & Pull Request Guidelines

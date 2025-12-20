@@ -16,7 +16,7 @@ final class CelesTrakViewModel {
     var tles: [TLE] = []
     var state: LoadState<[TLE]> = .idle
 
-    init(service: any CelesTrakTLEService = CelesTrakTLE()) {
+    init(service: any CelesTrakTLEService = CelesTrakTLEClient()) {
         self.service = service
     }
 
