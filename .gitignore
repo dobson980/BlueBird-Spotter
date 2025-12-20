@@ -1,0 +1,15 @@
+# Xcode
+.DS_Store
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+
+# SwiftPM (if any)
+.build/
+Packages/
+Package.resolved
+
+# Carthage/CocoaPods (if any)
+Carthage/Build/
+Pods/
