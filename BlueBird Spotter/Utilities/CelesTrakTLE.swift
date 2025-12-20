@@ -7,7 +7,7 @@
 
 import Foundation
 
-final class CelesTrakTLEClient {
+actor CelesTrakTLE: CelesTrakTLEService {
     private let session: URLSession
 
     init(session: URLSession = .shared) {
@@ -42,7 +42,7 @@ final class CelesTrakTLEClient {
     // MARK: - Parsing
 
     /// Supports both 3-line (title + line1 + line2) and 2-line (line1 + line2) formats.
-    static func parseTLEText(_ text: String) throws -> [TLE] {
+    nonisolated static func parseTLEText(_ text: String) throws -> [TLE] {
         let rawLines = text
             .split(whereSeparator: \.isNewline)
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -82,7 +82,9 @@ final class CelesTrakTLEClient {
                     throw CelesTrakError.malformedTLE(atLine: i + 2, context: "Expected line 2 to start with '2 '")
                 }
 
-                results.append(TLE(name: name, line1: line1, line2: line2))
+                if !name.uppercased().contains("DEB") {
+                    results.append(TLE(name: name, line1: line1, line2: line2))
+                }
                 i += 3
             }
         }

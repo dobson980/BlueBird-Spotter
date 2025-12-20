@@ -8,15 +8,42 @@
 import SwiftUI
 
 struct ContentView: View {
-    
-    var celesTrakTLEClient = CelesTrakTLEClient()
-    
+    @State private var viewModel = CelesTrakViewModel()
+
     var body: some View {
-        VStack {
+        VStack(spacing: 16) {
             Image(systemName: "globe")
                 .imageScale(.large)
                 .foregroundStyle(.tint)
-            Text("Hello, world!")
+
+            Group {
+                switch viewModel.state {
+                case .idle:
+                    Text("No TLEs loaded.")
+                case .loading:
+                    ProgressView("Loading TLEs...")
+                case .loaded(let tles):
+                    List(tles, id: \.line1) { tle in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(tle.name ?? "Unnamed satellite")
+                                .font(.headline)
+                            Text(tle.line1)
+                                .font(.caption)
+                                .monospaced()
+                            Text(tle.line2)
+                                .font(.caption)
+                                .monospaced()
+                        }
+                    }
+                case .error(let message):
+                    Text(message)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                }
+            }
+        }
+        .task {
+            await viewModel.fetchTLEs(nameQuery: "SPACEMOBILE")
         }
         .padding()
     }

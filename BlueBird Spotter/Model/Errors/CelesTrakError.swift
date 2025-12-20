@@ -5,7 +5,7 @@
 //  Created by Tom Dobson on 12/19/25.
 //
 
-enum CelesTrakError: Error {
+enum CelesTrakError: Error, Sendable {
     case invalidURL
     case nonHTTPResponse
     case badStatus(Int)
