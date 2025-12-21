@@ -24,6 +24,12 @@ struct ContentView: View {
                 .tabItem {
                     Label("Tracking", systemImage: "location.north.circle")
                 }
+
+            // The globe tab visualizes satellite positions around Earth.
+            GlobeView()
+                .tabItem {
+                    Label("Globe", systemImage: "globe.americas.fill")
+                }
         }
     }
 }
