@@ -17,6 +17,8 @@ import Observation
 final class CelesTrakViewModel {
     /// Injected fetcher to support testing or alternate data sources.
     private let fetchHandler: @Sendable (String) async throws -> TLERepositoryResult
+    /// Injected refresh handler for manual refresh requests.
+    private let refreshHandler: @Sendable (String) async throws -> TLERepositoryResult
 
     /// Latest fetched list for views that want direct access.
     var tles: [TLE] = []
@@ -30,22 +32,46 @@ final class CelesTrakViewModel {
     /// Default initializer that uses the shared production repository.
     init(repository: TLERepository = TLERepository.shared) {
         self.fetchHandler = repository.getTLEs
+        self.refreshHandler = repository.refreshTLEs
     }
 
     /// Test-friendly initializer that injects a custom fetch closure.
     init(fetchHandler: @escaping @Sendable (String) async throws -> TLERepositoryResult) {
         self.fetchHandler = fetchHandler
+        self.refreshHandler = fetchHandler
+    }
+
+    /// Test-friendly initializer for separate fetch and refresh behaviors.
+    init(
+        fetchHandler: @escaping @Sendable (String) async throws -> TLERepositoryResult,
+        refreshHandler: @escaping @Sendable (String) async throws -> TLERepositoryResult
+    ) {
+        self.fetchHandler = fetchHandler
+        self.refreshHandler = refreshHandler
     }
 
     /// Loads TLEs and updates state for the view layer.
     ///
     /// The method also sorts results alphabetically by satellite name.
     func fetchTLEs(nameQuery: String) async {
+        await loadTLEs(using: fetchHandler, nameQuery: nameQuery)
+    }
+
+    /// Triggers a foreground refresh that bypasses cache staleness checks.
+    func refreshTLEs(nameQuery: String) async {
+        await loadTLEs(using: refreshHandler, nameQuery: nameQuery)
+    }
+
+    /// Shared load path for fetch and refresh actions.
+    private func loadTLEs(
+        using handler: @escaping @Sendable (String) async throws -> TLERepositoryResult,
+        nameQuery: String
+    ) async {
         guard !state.isLoading || state.error != nil else { return }
         state = .loading
 
         do {
-            let result = try await fetchHandler(nameQuery)
+            let result = try await handler(nameQuery)
             tles = result.tles.sorted { lhs, rhs in
                 switch (lhs.name, rhs.name) {
                 case let (left?, right?):

@@ -59,6 +59,27 @@ struct TLEListView: View {
                         .multilineTextAlignment(.center)
                 }
             }
+
+#if DEBUG
+            // Debug-only controls for forcing a refresh during development.
+            VStack(spacing: 8) {
+                Button("Refresh Now") {
+                    Task {
+                        await viewModel.refreshTLEs(nameQuery: "SPACEMOBILE")
+                    }
+                }
+
+                if let lastFetchedAt = viewModel.lastFetchedAt {
+                    Text("Debug refresh time: \(lastFetchedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Debug refresh time: not yet loaded")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+#endif
         }
         .task {
             guard !isPreview else { return }

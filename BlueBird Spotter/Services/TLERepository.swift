@@ -82,6 +82,19 @@ actor TLERepository {
         }
     }
 
+    /// Forces a network refresh and falls back to cache if available.
+    func refreshTLEs(queryKey: String) async throws -> TLERepositoryResult {
+        let cached = try await loadCached(queryKey: queryKey)
+        do {
+            return try await fetchFromNetwork(queryKey: queryKey, cachedRecord: cached?.record)
+        } catch {
+            if let cached {
+                return cached.result
+            }
+            throw error
+        }
+    }
+
     /// Performs the cache-first lookup and conditional refresh flow.
     private func fetchTLEsInternal(queryKey: String) async throws -> TLERepositoryResult {
         // Step A: try cache first so the UI can render without waiting.
