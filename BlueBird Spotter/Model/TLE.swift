@@ -6,9 +6,12 @@
 //
 
 import Foundation
-
+/// Represents a single TLE record with optional name and two data lines.
 struct TLE: Sendable, Equatable {
-    let name: String?     // Title line if present
-    let line1: String     // Must start with "1 "
-    let line2: String     // Must start with "2 "
+    /// Optional title line from 3-line TLE format.
+    let name: String?
+    /// First data line, expected to start with "1 ".
+    let line1: String
+    /// Second data line, expected to start with "2 ".
+    let line2: String
 }

@@ -5,23 +5,14 @@
 //  Created by Tom Dobson on 12/19/25.
 //
 
+import Foundation
 import Testing
 @testable import BlueBird_Spotter
 
+/// Unit tests that validate parsing and view model behavior.
 struct BlueBird_SpotterTests {
 
-    private struct StubTLEService: CelesTrakTLEService {
-        let tles: [TLE]
-
-        func fetchTLEs(nameQuery: String) async throws -> [TLE] {
-            tles
-        }
-
-        nonisolated static func parseTLEText(_ text: String) throws -> [TLE] {
-            try CelesTrakTLEClient.parseTLEText(text)
-        }
-    }
-
+    /// Confirms name + two lines are parsed as a 3-line TLE.
     @Test @MainActor func parseTLEText_parsesThreeLineFormat() async throws {
         let text = """
         BLUEBIRD-1
@@ -35,6 +26,7 @@ struct BlueBird_SpotterTests {
         #expect(tles.first?.name == "BLUEBIRD-1")
     }
 
+    /// Confirms a 2-line TLE parses without a name.
     @Test @MainActor func parseTLEText_allowsTwoLineFormat() async throws {
         let text = """
         1 25544U 98067A   20344.12345678  .00001234  00000-0  10270-3 0  9991
@@ -47,6 +39,7 @@ struct BlueBird_SpotterTests {
         #expect(tles.first?.name == nil)
     }
 
+    /// Confirms malformed input throws a typed parse error.
     @Test @MainActor func parseTLEText_throwsOnMalformedBlock() async throws {
         let text = """
         BLUEBIRD-2
@@ -69,13 +62,18 @@ struct BlueBird_SpotterTests {
         }
     }
 
+    /// Confirms view model sorting uses case-insensitive name ordering.
     @Test @MainActor func viewModel_sortsTLEsByName() async throws {
-        let stub = StubTLEService(tles: [
-            TLE(name: "Zulu", line1: "1 Z", line2: "2 Z"),
-            TLE(name: "alpha", line1: "1 A", line2: "2 A"),
-            TLE(name: nil, line1: "1 N", line2: "2 N"),
-        ])
-        let viewModel = CelesTrakViewModel(service: stub)
+        let result = TLERepositoryResult(
+            tles: [
+                TLE(name: "Zulu", line1: "1 Z", line2: "2 Z"),
+                TLE(name: "alpha", line1: "1 A", line2: "2 A"),
+                TLE(name: nil, line1: "1 N", line2: "2 N"),
+            ],
+            fetchedAt: Date(),
+            source: .cache
+        )
+        let viewModel = CelesTrakViewModel(fetchHandler: { _ in result })
 
         await viewModel.fetchTLEs(nameQuery: "BLUEBIRD")
 

@@ -7,6 +7,7 @@
 
 import XCTest
 
+/// Captures a launch snapshot for visual regression checks.
 final class BlueBird_SpotterUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
@@ -17,13 +18,11 @@ final class BlueBird_SpotterUITestsLaunchTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Takes a screenshot right after launch for reference.
     @MainActor
     func testLaunch() throws {
         let app = XCUIApplication()
         app.launch()
-
-        // Insert steps here to perform after app launch but before taking a screenshot,
-        // such as logging into a test account or navigating somewhere in the app
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Launch Screen"

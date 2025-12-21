@@ -7,48 +7,28 @@
 
 import SwiftUI
 
+/// Root container that switches between TLE listing and live tracking.
+///
+/// Tabs make it easy to compare raw TLE data with derived positions.
 struct ContentView: View {
-    @State private var viewModel = CelesTrakViewModel()
-
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-
-            Group {
-                switch viewModel.state {
-                case .idle:
-                    Text("No TLEs loaded.")
-                case .loading:
-                    ProgressView("Loading TLEs...")
-                case .loaded(let tles):
-                    List(tles, id: \.line1) { tle in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(tle.name ?? "Unnamed satellite")
-                                .font(.headline)
-                            Text(tle.line1)
-                                .font(.caption)
-                                .monospaced()
-                            Text(tle.line2)
-                                .font(.caption)
-                                .monospaced()
-                        }
-                    }
-                case .error(let message):
-                    Text(message)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
+        TabView {
+            // The TLE tab keeps the original list-based UI intact.
+            TLEListView()
+                .tabItem {
+                    Label("TLEs", systemImage: "list.bullet")
                 }
-            }
+
+            // The tracking tab shows 1Hz orbital updates.
+            TrackingView()
+                .tabItem {
+                    Label("Tracking", systemImage: "location.north.circle")
+                }
         }
-        .task {
-            await viewModel.fetchTLEs(nameQuery: "SPACEMOBILE")
-        }
-        .padding()
     }
 }
 
+/// Preview for quickly checking load-state layout in Xcode.
 #Preview {
     ContentView()
 }
