@@ -10,6 +10,13 @@ import SwiftUI
 
 /// Wraps an `SCNView` to display a textured Earth and orbiting satellites.
 struct GlobeSceneView: UIViewRepresentable {
+    /// Scene-space radius for Earth after normalization.
+    private static let earthRadiusScene: Float = 1.0
+    /// Rotate the model so the prime meridian faces +Z when needed.
+    private static let earthPrimeMeridianRotation: Float = -.pi / 2
+    /// Enables optional debug markers for orientation checks.
+    private static let showDebugMarkers = true
+
     /// Latest tracked satellite positions to render.
     let trackedSatellites: [TrackedSatellite]
     /// Notifies SwiftUI when the user taps a satellite node.
@@ -43,15 +50,13 @@ struct GlobeSceneView: UIViewRepresentable {
     private func makeScene() -> SCNScene {
         let scene = SCNScene()
 
-        // Earth sphere sized so radius = 1 SceneKit unit.
-        let earthGeometry = SCNSphere(radius: 1.0)
-        let earthMaterial = SCNMaterial()
-        earthMaterial.diffuse.contents = UIImage(named: "EarthTexture")
-        earthMaterial.specular.contents = UIColor.white.withAlphaComponent(0.2)
-        earthGeometry.materials = [earthMaterial]
-
-        let earthNode = SCNNode(geometry: earthGeometry)
+        // Build a textured Earth sphere with a matching clouds layer.
+        let earthNode = loadEarthNode(radiusScene: Self.earthRadiusScene)
         scene.rootNode.addChildNode(earthNode)
+
+        if Self.showDebugMarkers {
+            addDebugMarkers(to: scene, earthRadiusScene: Self.earthRadiusScene)
+        }
 
         // Camera sits back far enough to see the full globe.
         let camera = SCNCamera()
@@ -61,22 +66,106 @@ struct GlobeSceneView: UIViewRepresentable {
         cameraNode.position = SCNVector3(0, 0, 3)
         scene.rootNode.addChildNode(cameraNode)
 
-        // Lighting keeps the sphere readable while still showing texture detail.
-        let light = SCNLight()
-        light.type = .omni
-        let lightNode = SCNNode()
-        lightNode.light = light
-        lightNode.position = SCNVector3(2, 2, 4)
-        scene.rootNode.addChildNode(lightNode)
+        // Lighting keeps the day/night contrast while letting night lights read.
+        let sun = SCNLight()
+        sun.type = .directional
+        sun.intensity = 900
+        sun.castsShadow = true
+        sun.shadowMode = .deferred
+        sun.shadowRadius = 6
+        sun.shadowColor = UIColor.black.withAlphaComponent(0.6)
+        let sunNode = SCNNode()
+        sunNode.light = sun
+        sunNode.eulerAngles = SCNVector3(-0.6, 0.3, 0)
+        scene.rootNode.addChildNode(sunNode)
 
         let ambient = SCNLight()
         ambient.type = .ambient
-        ambient.intensity = 350
+        ambient.intensity = 40
         let ambientNode = SCNNode()
         ambientNode.light = ambient
         scene.rootNode.addChildNode(ambientNode)
 
         return scene
+    }
+
+    /// Loads the USDZ Earth model and normalizes it to the desired radius.
+    private func loadEarthNode(radiusScene: Float) -> SCNNode {
+        let earthRootNode = SCNNode()
+        earthRootNode.name = "earthRoot"
+
+        guard let url = Bundle.main.url(forResource: "Earth", withExtension: "usdz"),
+              let referenceNode = SCNReferenceNode(url: url) else {
+            return earthRootNode
+        }
+
+        referenceNode.load()
+        earthRootNode.addChildNode(referenceNode)
+
+        // Normalize the USDZ so its largest radius matches the scene radius.
+        let (minBounds, maxBounds) = referenceNode.boundingBox
+        let extent = SCNVector3(
+            maxBounds.x - minBounds.x,
+            maxBounds.y - minBounds.y,
+            maxBounds.z - minBounds.z
+        )
+        let maxExtent = max(extent.x, max(extent.y, extent.z))
+        let radius = maxExtent * 0.5
+        if radius > 0 {
+            let scale = radiusScene / radius
+            earthRootNode.scale = SCNVector3(scale, scale, scale)
+        }
+
+        // Adjust orientation if the model's prime meridian needs alignment with +Z.
+        earthRootNode.eulerAngles = SCNVector3(0, Self.earthPrimeMeridianRotation, 0)
+
+        return earthRootNode
+    }
+
+    /// Adds marker spheres to verify orientation and coordinate mapping.
+    private func addDebugMarkers(to scene: SCNScene, earthRadiusScene: Float) {
+        let markers: [(String, Double, Double, UIColor)] = [
+            ("Equator 0,0", 0, 0, .systemRed),
+            ("Equator 0,90E", 0, 90, .systemGreen),
+            ("North Pole", 90, 0, .systemBlue)
+        ]
+
+        for (label, lat, lon, color) in markers {
+            let position = SatellitePosition(
+                timestamp: Date(),
+                latitudeDegrees: lat,
+                longitudeDegrees: lon,
+                altitudeKm: 0
+            )
+            let node = SCNNode(geometry: SCNSphere(radius: 0.02))
+            node.name = label
+            node.geometry?.firstMaterial?.diffuse.contents = color
+            node.position = GlobeCoordinateConverter.scenePosition(
+                from: position,
+                earthRadiusScene: earthRadiusScene
+            )
+            scene.rootNode.addChildNode(node)
+            scene.rootNode.addChildNode(makeMarkerLabel(text: label, color: color, at: node.position))
+        }
+    }
+
+    /// Creates a small billboard label so each debug marker is easy to identify in 3D.
+    private func makeMarkerLabel(text: String, color: UIColor, at position: SCNVector3) -> SCNNode {
+        let textGeometry = SCNText(string: text, extrusionDepth: 0.2)
+        textGeometry.font = UIFont.systemFont(ofSize: 6, weight: .semibold)
+        textGeometry.firstMaterial?.diffuse.contents = color
+        textGeometry.firstMaterial?.isDoubleSided = true
+
+        let textNode = SCNNode(geometry: textGeometry)
+        textNode.scale = SCNVector3(0.003, 0.003, 0.003)
+        textNode.position = SCNVector3(position.x, position.y + 0.04, position.z)
+
+        // Billboard keeps the label facing the camera so it stays readable.
+        let billboard = SCNBillboardConstraint()
+        billboard.freeAxes = .Y
+        textNode.constraints = [billboard]
+
+        return textNode
     }
 
     /// Coordinator stores satellite nodes to avoid re-creating geometry each tick.
@@ -104,11 +193,10 @@ struct GlobeSceneView: UIViewRepresentable {
                 let id = trackedSatellite.satellite.id
                 let node = satelliteNodes[id] ?? makeSatelliteNode(for: trackedSatellite, in: scene)
                 let position = GlobeCoordinateConverter.scenePosition(
-                    latitudeDegrees: trackedSatellite.position.latitudeDegrees,
-                    longitudeDegrees: trackedSatellite.position.longitudeDegrees,
-                    altitudeKm: trackedSatellite.position.altitudeKm
+                    from: trackedSatellite.position,
+                    earthRadiusScene: GlobeSceneView.earthRadiusScene
                 )
-                node.position = SCNVector3(position.x, position.y, position.z)
+                node.position = position
             }
 
             SCNTransaction.commit()
