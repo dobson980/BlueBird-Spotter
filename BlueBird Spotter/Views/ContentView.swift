@@ -31,6 +31,8 @@ struct ContentView: View {
                     Label("Globe", systemImage: "globe.americas.fill")
                 }
         }
+        // Let tab content flow under the tab bar so it feels like a floating glass overlay.
+        .ignoresSafeArea(.container, edges: .bottom)
     }
 }
 

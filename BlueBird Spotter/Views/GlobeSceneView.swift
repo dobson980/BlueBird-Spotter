@@ -5,6 +5,8 @@
 //  Created by Tom Dobson on 12/21/25.
 //
 
+import QuartzCore
+import SatKit
 import SceneKit
 import SwiftUI
 import simd
@@ -33,6 +35,12 @@ struct GlobeSceneView: UIViewRepresentable {
     private static let earthPrimeMeridianRotation: Float = -.pi / 2
     /// Enables optional debug markers for orientation checks.
     private static let showDebugMarkers = GlobeDebugFlags.showDebugMarkers
+    /// Default intensity for the directional sun light.
+    private static let sunLightIntensity: CGFloat = 900
+    /// Default intensity for the ambient fill light.
+    private static let ambientLightIntensity: CGFloat = 40
+    /// Slightly brighter ambient when the directional light is disabled.
+    private static let ambientLightIntensityWhenDirectionalOff: CGFloat = 380
 
     /// Latest tracked satellite positions to render.
     let trackedSatellites: [TrackedSatellite]
@@ -40,6 +48,12 @@ struct GlobeSceneView: UIViewRepresentable {
     let config: SatelliteRenderConfig
     /// Selected satellite id so the renderer can promote detail without a reset.
     let selectedSatelliteId: Int?
+    /// Controls whether the directional light is enabled.
+    let isDirectionalLightEnabled: Bool
+    /// Controls which orbital paths are rendered.
+    let orbitPathMode: OrbitPathMode
+    /// Rendering configuration for orbital paths.
+    let orbitPathConfig: OrbitPathConfig
     /// Optional debug hook for exposing render stats to SwiftUI overlays.
     let onStats: ((GlobeRenderStats) -> Void)?
     /// Notifies SwiftUI when the user taps a satellite node.
@@ -49,7 +63,9 @@ struct GlobeSceneView: UIViewRepresentable {
         let view = SCNView()
         view.antialiasingMode = .multisampling4X
         view.scene = makeScene()
-        view.backgroundColor = UIColor.systemBackground
+        // Clear background so the SwiftUI space backdrop shows through.
+        view.backgroundColor = UIColor.clear
+        view.isOpaque = false
         view.allowsCameraControl = true
         view.cameraControlConfiguration.allowsTranslation = false
         view.autoenablesDefaultLighting = false
@@ -64,10 +80,17 @@ struct GlobeSceneView: UIViewRepresentable {
     func updateUIView(_ uiView: SCNView, context: Context) {
         guard let scene = uiView.scene else { return }
         context.coordinator.renderConfig = config
+        context.coordinator.updateLighting(in: scene, isDirectionalLightEnabled: isDirectionalLightEnabled)
         context.coordinator.updateSatellites(
             trackedSatellites,
             in: scene,
             selectedId: selectedSatelliteId
+        )
+        context.coordinator.updateOrbitPaths(
+            for: trackedSatellites,
+            selectedId: selectedSatelliteId,
+            mode: orbitPathMode,
+            config: orbitPathConfig
         )
     }
 
@@ -78,6 +101,7 @@ struct GlobeSceneView: UIViewRepresentable {
     /// Builds the base SceneKit scene with Earth, camera, and lighting.
     private func makeScene() -> SCNScene {
         let scene = SCNScene()
+        scene.background.contents = UIColor.clear
 
         // Build the Earth model (fallback sphere for previews only).
         let earthNode = loadEarthNode(radiusScene: Self.earthRadiusScene)
@@ -99,21 +123,23 @@ struct GlobeSceneView: UIViewRepresentable {
         // Lighting keeps the day/night contrast while letting night lights read.
         let sun = SCNLight()
         sun.type = .directional
-        sun.intensity = 900
+        sun.intensity = Self.sunLightIntensity
         sun.castsShadow = true
         sun.shadowMode = .deferred
         sun.shadowRadius = 6
         sun.shadowColor = UIColor.black.withAlphaComponent(0.6)
         let sunNode = SCNNode()
         sunNode.light = sun
+        sunNode.name = "sunLight"
         sunNode.eulerAngles = SCNVector3(-0.6, 0.3, 0)
         scene.rootNode.addChildNode(sunNode)
 
         let ambient = SCNLight()
         ambient.type = .ambient
-        ambient.intensity = 40
+        ambient.intensity = Self.ambientLightIntensity
         let ambientNode = SCNNode()
         ambientNode.light = ambient
+        ambientNode.name = "ambientLight"
         scene.rootNode.addChildNode(ambientNode)
 
         return scene
@@ -224,12 +250,19 @@ struct GlobeSceneView: UIViewRepresentable {
             case low
         }
 
+        /// Limits how many orbit paths build concurrently to keep the UI responsive.
+        private static let maxConcurrentOrbitPathBuilds = 2
+
         private var satelliteNodes: [Int: SCNNode] = [:]
         private var lastPositions: [Int: SCNVector3] = [:]
         /// Cached orientation quaternions to smooth per-tick updates.
         private var lastOrientation: [Int: simd_quatf] = [:]
         /// Cached right-axis vectors to stabilize yaw when velocity is noisy.
         private var lastRightAxis: [Int: simd_float3] = [:]
+        /// Timestamp of the most recent tracking tick for interpolation.
+        private var lastTickTimestamp: Date?
+        /// Cached animation duration for smooth position updates.
+        private var lastAnimationDuration: TimeInterval = 0
         /// Tracks which detail tier each satellite node is using.
         private var nodeDetailTiers: [Int: DetailTier] = [:]
         /// High-detail template generated from the USDZ model.
@@ -244,6 +277,18 @@ struct GlobeSceneView: UIViewRepresentable {
         private var nodeUsesModel: [Int: Bool] = [:]
         /// Last scale applied to model nodes so we avoid redundant updates.
         private var lastScale: Float?
+        /// Tracks the last applied directional light state to avoid redundant work.
+        private var lastDirectionalLightEnabled: Bool?
+        /// Cached orbital path nodes keyed by shared orbital signatures.
+        private var orbitPathNodes: [OrbitSignature: SCNNode] = [:]
+        /// In-flight orbit path build tasks.
+        private var orbitPathTasks: [OrbitSignature: Task<[SIMD3<Float>], Never>] = [:]
+        /// Remembers the last orbit path config to refresh when settings change.
+        private var lastOrbitPathConfig: OrbitPathConfig?
+        /// Remembers the active sample count so we can rebuild when it changes.
+        private var lastOrbitPathSampleCount: Int?
+        /// Latest Earth-rotation alignment applied to orbit path nodes.
+        private var lastOrbitRotation: simd_quatf?
         /// Latest tuning knobs from SwiftUI.
         var renderConfig: SatelliteRenderConfig
         private let onSelect: (Int?) -> Void
@@ -289,10 +334,19 @@ struct GlobeSceneView: UIViewRepresentable {
                 nodeUsesModel[id] = nil
             }
 
-            SCNTransaction.begin()
-            SCNTransaction.disableActions = true
+            let tickTimestamp = tracked.first?.position.timestamp
+            let animationDuration: TimeInterval
+            if let tickTimestamp, let lastTickTimestamp {
+                let delta = tickTimestamp.timeIntervalSince(lastTickTimestamp)
+                animationDuration = max(0, min(delta, 1.5))
+            } else {
+                animationDuration = 0
+            }
+            lastTickTimestamp = tickTimestamp
+            lastAnimationDuration = animationDuration
 
-            let shouldApplyScale = lastScale != renderConfig.scale
+            var updates: [(id: Int, node: SCNNode, position: SCNVector3)] = []
+            updates.reserveCapacity(tracked.count)
 
             for trackedSatellite in tracked {
                 let id = trackedSatellite.satellite.id
@@ -316,17 +370,32 @@ struct GlobeSceneView: UIViewRepresentable {
                     from: trackedSatellite.position,
                     earthRadiusScene: GlobeSceneView.earthRadiusScene
                 )
-                node.position = position
-                applyOrientation(for: id, node: node, currentPosition: position)
+                updates.append((id: id, node: node, position: position))
+            }
 
-                if shouldUseModel, nodeUsesModel[id] == true {
+            // Animate positions so satellites glide between 1Hz tracking ticks.
+            SCNTransaction.begin()
+            SCNTransaction.disableActions = animationDuration == 0
+            SCNTransaction.animationDuration = animationDuration
+            SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .linear)
+            for update in updates {
+                update.node.position = update.position
+            }
+            SCNTransaction.commit()
+
+            // Update orientation and scale without implicit SceneKit animations.
+            SCNTransaction.begin()
+            SCNTransaction.disableActions = true
+            let shouldApplyScale = lastScale != renderConfig.scale
+            for update in updates {
+                applyOrientation(for: update.id, node: update.node, currentPosition: update.position)
+                if shouldUseModel, nodeUsesModel[update.id] == true {
                     let scale = renderConfig.scale
-                    if shouldApplyScale || node.scale.x != scale {
-                        applyModelScale(scale, to: node)
+                    if shouldApplyScale || update.node.scale.x != scale {
+                        applyModelScale(scale, to: update.node)
                     }
                 }
             }
-
             SCNTransaction.commit()
 
             if shouldUseModel {
@@ -334,6 +403,79 @@ struct GlobeSceneView: UIViewRepresentable {
             }
 
             publishStats(trackedCount: tracked.count, shouldUseModel: shouldUseModel)
+        }
+
+        /// Updates directional and ambient lighting based on user settings.
+        func updateLighting(in scene: SCNScene, isDirectionalLightEnabled: Bool) {
+            guard lastDirectionalLightEnabled != isDirectionalLightEnabled else { return }
+            lastDirectionalLightEnabled = isDirectionalLightEnabled
+
+            let sunNode = scene.rootNode.childNode(withName: "sunLight", recursively: false)
+            let ambientNode = scene.rootNode.childNode(withName: "ambientLight", recursively: false)
+
+            if isDirectionalLightEnabled {
+                sunNode?.light?.intensity = GlobeSceneView.sunLightIntensity
+                sunNode?.light?.castsShadow = true
+                ambientNode?.light?.intensity = GlobeSceneView.ambientLightIntensity
+            } else {
+                sunNode?.light?.intensity = 0
+                sunNode?.light?.castsShadow = false
+                ambientNode?.light?.intensity = GlobeSceneView.ambientLightIntensityWhenDirectionalOff
+            }
+        }
+
+        /// Renders orbital paths based on the selected mode, deduping shared orbits.
+        func updateOrbitPaths(
+            for tracked: [TrackedSatellite],
+            selectedId: Int?,
+            mode: OrbitPathMode,
+            config: OrbitPathConfig
+        ) {
+            if lastOrbitPathConfig != config {
+                clearOrbitPaths()
+                lastOrbitPathConfig = config
+            }
+
+            let referenceDate = tracked.first?.position.timestamp ?? Date()
+            applyOrbitRotation(for: referenceDate)
+
+            let signaturesById = buildOrbitSignatures(from: tracked)
+            let representative = buildRepresentativeSatellites(from: tracked, signatures: signaturesById)
+            let desiredSignatures: Set<OrbitSignature>
+
+            switch mode {
+            case .off:
+                desiredSignatures = []
+            case .selectedOnly:
+                if let selectedId,
+                   let signature = signaturesById[selectedId] {
+                    desiredSignatures = [signature]
+                } else {
+                    desiredSignatures = []
+                }
+            case .all:
+                desiredSignatures = Set(signaturesById.values)
+            }
+
+            let effectiveSampleCount = orbitPathSampleCount(
+                for: mode,
+                desiredCount: desiredSignatures.count,
+                baseSampleCount: config.sampleCount
+            )
+            if lastOrbitPathSampleCount != effectiveSampleCount {
+                clearOrbitPaths()
+                lastOrbitPathSampleCount = effectiveSampleCount
+            }
+
+            removeOrbitPaths(excluding: desiredSignatures)
+            buildMissingOrbitPaths(
+                desired: desiredSignatures,
+                representative: representative,
+                config: config,
+                referenceDate: referenceDate,
+                sampleCount: effectiveSampleCount,
+                priority: mode == .all ? .utility : .userInitiated
+            )
         }
 
         /// Handles taps by hit-testing SceneKit nodes.
@@ -584,6 +726,234 @@ struct GlobeSceneView: UIViewRepresentable {
             }
         }
 
+        /// Removes all cached orbit paths and cancels in-flight builds.
+        private func clearOrbitPaths() {
+            for node in orbitPathNodes.values {
+                node.removeFromParentNode()
+            }
+            orbitPathNodes.removeAll()
+            for task in orbitPathTasks.values {
+                task.cancel()
+            }
+            orbitPathTasks.removeAll()
+        }
+
+        /// Builds a map of satellite ids to their deduped orbit signatures.
+        private func buildOrbitSignatures(from tracked: [TrackedSatellite]) -> [Int: OrbitSignature] {
+            var signatures: [Int: OrbitSignature] = [:]
+            for trackedSatellite in tracked {
+                if let signature = OrbitSignature(tleLine2: trackedSatellite.satellite.tleLine2) {
+                    signatures[trackedSatellite.satellite.id] = signature
+                }
+            }
+            return signatures
+        }
+
+        /// Picks a single representative satellite for each shared orbit signature.
+        private func buildRepresentativeSatellites(
+            from tracked: [TrackedSatellite],
+            signatures: [Int: OrbitSignature]
+        ) -> [OrbitSignature: Satellite] {
+            var representatives: [OrbitSignature: Satellite] = [:]
+            for trackedSatellite in tracked {
+                guard let signature = signatures[trackedSatellite.satellite.id] else { continue }
+                if representatives[signature] == nil {
+                    representatives[signature] = trackedSatellite.satellite
+                }
+            }
+            return representatives
+        }
+
+        /// Removes orbit paths that are no longer required by the active mode.
+        private func removeOrbitPaths(excluding desired: Set<OrbitSignature>) {
+            for (signature, node) in orbitPathNodes where !desired.contains(signature) {
+                node.removeFromParentNode()
+                orbitPathNodes[signature] = nil
+            }
+            for (signature, task) in orbitPathTasks where !desired.contains(signature) {
+                task.cancel()
+                orbitPathTasks[signature] = nil
+            }
+        }
+
+        /// Builds missing orbital paths asynchronously for the requested signatures.
+        private func buildMissingOrbitPaths(
+            desired: Set<OrbitSignature>,
+            representative: [OrbitSignature: Satellite],
+            config: OrbitPathConfig,
+            referenceDate: Date,
+            sampleCount: Int,
+            priority: TaskPriority
+        ) {
+            let altitudeOffsetKm = config.altitudeOffsetKm
+
+            for signature in desired {
+                if orbitPathTasks.count >= Self.maxConcurrentOrbitPathBuilds {
+                    break
+                }
+                guard orbitPathNodes[signature] == nil,
+                      orbitPathTasks[signature] == nil,
+                      let satellite = representative[signature] else { continue }
+
+                let task = Task.detached(priority: priority) {
+                    return Self.buildOrbitPathVertices(
+                        for: satellite,
+                        referenceDate: referenceDate,
+                        sampleCount: sampleCount,
+                        altitudeOffsetKm: altitudeOffsetKm
+                    )
+                }
+
+                orbitPathTasks[signature] = task
+
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    let vertices = await task.value
+                    self.orbitPathTasks[signature] = nil
+
+                    guard !Task.isCancelled,
+                          self.orbitPathNodes[signature] == nil,
+                          desired.contains(signature),
+                          vertices.count > 1 else { return }
+
+                    guard let config = self.lastOrbitPathConfig else { return }
+                    let node = self.makeOrbitPathNode(vertices: vertices, config: config)
+                    if let rotation = self.lastOrbitRotation {
+                        node.simdOrientation = rotation
+                    }
+                    self.view?.scene?.rootNode.addChildNode(node)
+                    self.orbitPathNodes[signature] = node
+                }
+            }
+        }
+
+        /// Aligns orbit path nodes with the current Earth rotation angle.
+        private func applyOrbitRotation(for date: Date) {
+            let gmstRadians = EarthCoordinateConverter.gmstRadians(for: date)
+            // Rotate inertial (TEME) paths into the Earth-fixed frame used by the globe.
+            let rotation = simd_quatf(angle: Float(-gmstRadians), axis: simd_float3(0, 1, 0))
+            lastOrbitRotation = rotation
+            for node in orbitPathNodes.values {
+                node.simdOrientation = rotation
+            }
+        }
+
+        /// Creates a SceneKit node for an orbital path line strip.
+        private func makeOrbitPathNode(vertices: [SIMD3<Float>], config: OrbitPathConfig) -> SCNNode {
+            let scnVertices = vertices.map { SCNVector3($0.x, $0.y, $0.z) }
+            let source = SCNGeometrySource(vertices: scnVertices)
+            let indices = buildLineIndices(count: scnVertices.count)
+            let element = SCNGeometryElement(indices: indices, primitiveType: .line)
+
+            let geometry = SCNGeometry(sources: [source], elements: [element])
+            let material = SCNMaterial()
+            material.diffuse.contents = config.lineColor
+            material.emission.contents = config.lineColor
+            material.transparency = config.lineOpacity
+            material.isDoubleSided = true
+            material.writesToDepthBuffer = false
+            material.readsFromDepthBuffer = true
+            geometry.materials = [material]
+
+            return SCNNode(geometry: geometry)
+        }
+
+        /// Builds the index list for consecutive line segments.
+        private func buildLineIndices(count: Int) -> [UInt32] {
+            guard count > 1 else { return [] }
+            var indices: [UInt32] = []
+            indices.reserveCapacity((count - 1) * 2)
+            for index in 0..<(count - 1) {
+                indices.append(UInt32(index))
+                indices.append(UInt32(index + 1))
+            }
+            return indices
+        }
+
+        /// Chooses a lighter sample count when many paths are requested at once.
+        private func orbitPathSampleCount(
+            for mode: OrbitPathMode,
+            desiredCount: Int,
+            baseSampleCount: Int
+        ) -> Int {
+            guard mode == .all else { return baseSampleCount }
+            if desiredCount > 150 {
+                return max(40, baseSampleCount / 4)
+            }
+            if desiredCount > 60 {
+                return max(60, baseSampleCount / 2)
+            }
+            return baseSampleCount
+        }
+
+        /// Computes orbit path vertices in scene space without touching SceneKit types.
+        private nonisolated static func buildOrbitPathVertices(
+            for satellite: Satellite,
+            referenceDate: Date,
+            sampleCount: Int,
+            altitudeOffsetKm: Double
+        ) -> [SIMD3<Float>] {
+            guard sampleCount > 1,
+                  let meanMotion = Self.parseMeanMotion(from: satellite.tleLine2),
+                  meanMotion > 0,
+                  let elements = try? SatKit.Elements(satellite.name, satellite.tleLine1, satellite.tleLine2) else {
+                return []
+            }
+
+            let propagator = SatKit.selectPropagatorLegacy(elements)
+            let epochDate = Date(ds1950: elements.t₀)
+            let periodSeconds = 86400.0 / meanMotion
+            let step = periodSeconds / Double(sampleCount)
+
+            var vertices: [SIMD3<Float>] = []
+            vertices.reserveCapacity(sampleCount + 1)
+
+            for index in 0..<sampleCount {
+                if Task.isCancelled { break }
+                let date = referenceDate.addingTimeInterval(Double(index) * step)
+                let minutesSinceEpoch = date.timeIntervalSince(epochDate) / 60.0
+                guard let pvCoordinates = try? propagator.getPVCoordinates(minsAfterEpoch: minutesSinceEpoch) else {
+                    continue
+                }
+
+                let temePosition = SIMD3(
+                    pvCoordinates.position.x / 1000.0,
+                    pvCoordinates.position.y / 1000.0,
+                    pvCoordinates.position.z / 1000.0
+                )
+                let radiusKm = max(simd_length(temePosition), GlobeCoordinateConverter.earthRadiusKm)
+                let adjustedRadius = max(GlobeCoordinateConverter.earthRadiusKm, radiusKm - altitudeOffsetKm)
+                let normalized = temePosition / radiusKm
+                let adjustedPosition = normalized * adjustedRadius
+
+                let scale = GlobeCoordinateConverter.defaultScale
+                // Map TEME axes to the scene axes used by GlobeCoordinateConverter:
+                // TEME x -> scene z, TEME y -> scene x, TEME z -> scene y.
+                vertices.append(
+                    SIMD3<Float>(
+                        Float(adjustedPosition.y * scale),
+                        Float(adjustedPosition.z * scale),
+                        Float(adjustedPosition.x * scale)
+                    )
+                )
+            }
+
+            // Close the loop so the orbit reads as a continuous path.
+            if let first = vertices.first {
+                vertices.append(first)
+            }
+            return vertices
+        }
+
+        /// Extracts mean motion from TLE line 2 without touching main-actor state.
+        private nonisolated static func parseMeanMotion(from line: String) -> Double? {
+            guard line.count >= 63 else { return nil }
+            let start = line.index(line.startIndex, offsetBy: 52)
+            let end = line.index(line.startIndex, offsetBy: 62)
+            let substring = line[start...end].trimmingCharacters(in: .whitespaces)
+            return Double(substring)
+        }
+
         /// Emits render diagnostics for debug overlays.
         private func publishStats(trackedCount: Int, shouldUseModel: Bool) {
             guard let onStats else { return }
@@ -721,6 +1091,8 @@ struct GlobeSceneView: UIViewRepresentable {
             lastPositions.removeAll()
             lastOrientation.removeAll()
             lastRightAxis.removeAll()
+            lastTickTimestamp = nil
+            lastAnimationDuration = 0
             nodeDetailTiers.removeAll()
             nodeUsesModel.removeAll()
             lastScale = nil

@@ -73,7 +73,9 @@ struct EarthCoordinateConverter {
     }
 
     /// Computes the Greenwich Mean Sidereal Time in radians for a given date.
-    nonisolated private static func gmstRadians(for date: Date) -> Double {
+    ///
+    /// Exposed so rendering code can align inertial orbital paths to Earth.
+    nonisolated static func gmstRadians(for date: Date) -> Double {
         let julianDate = date.timeIntervalSince1970 / 86400.0 + 2440587.5
         let centuries = (julianDate - 2451545.0) / 36525.0
         let gmstSeconds = 67310.54841

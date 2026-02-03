@@ -13,6 +13,12 @@ struct GlobeView: View {
     @State private var viewModel: TrackingViewModel
     /// Currently selected satellite for the detail overlay.
     @State private var selectedSatelliteId: Int?
+    /// Stores the persisted directional light toggle.
+    @AppStorage("globe.light.directional.enabled") private var directionalLightEnabled = true
+    /// Stores the persisted orbit path mode selection.
+    @AppStorage("globe.orbit.mode") private var orbitPathModeRaw = OrbitPathMode.selectedOnly.rawValue
+    /// Controls whether the globe settings panel is visible.
+    @State private var isSettingsExpanded = false
     #if DEBUG
     /// Latest render diagnostics for debugging missing content.
     @State private var renderStats: GlobeRenderStats?
@@ -40,18 +46,51 @@ struct GlobeView: View {
 
     var body: some View {
         ZStack {
+            spaceBackground
+
             GlobeSceneView(
                 trackedSatellites: viewModel.trackedSatellites,
                 config: satelliteRenderConfig,
                 selectedSatelliteId: selectedSatelliteId,
+                isDirectionalLightEnabled: directionalLightEnabled,
+                orbitPathMode: orbitPathMode,
+                orbitPathConfig: OrbitPathConfig.default,
                 onStats: statsHandler,
                 onSelect: { selectedSatelliteId = $0 }
             )
+            // Let the globe fill under the status and tab bars for a more immersive view.
+            .ignoresSafeArea(.container, edges: [.top, .bottom])
 
             if let selected = selectedSatellite {
                 GlobeSelectionOverlay(trackedSatellite: selected)
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+
+            settingsButton
+                .padding()
+                // Safe-area padding keeps the floating control visible under the status bar cutout.
+                .safeAreaPadding(.top, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+
+            if isSettingsExpanded {
+                // A transparent scrim captures taps to dismiss the settings panel.
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isSettingsExpanded = false
+                        }
+                    }
+            }
+
+            if isSettingsExpanded {
+                settingsPanel
+                    .padding()
+                    // Match the settings button by staying inside the top safe area.
+                    .safeAreaPadding(.top, 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             #if DEBUG
@@ -76,6 +115,18 @@ struct GlobeView: View {
             // Cancels tracking to avoid background work when the tab is hidden.
             viewModel.stopTracking()
         }
+    }
+
+    /// Full-screen space backdrop shared across tabs.
+    private var spaceBackground: some View {
+        GeometryReader { geometry in
+            Image("space")
+                .resizable()
+                .scaledToFill()
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
+        }
+        .ignoresSafeArea()
     }
 
     /// Bundle all tuning knobs into a single config for SceneKit.
@@ -137,15 +188,6 @@ struct GlobeView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    /// Provides the debug stats callback when the build supports it.
-    private var statsHandler: ((GlobeRenderStats) -> Void)? {
-        #if DEBUG
-        return { renderStats = $0 }
-        #else
-        return nil
-        #endif
-    }
-
     /// Builds a lightweight debug readout for globe rendering stats.
     private var renderStatsOverlay: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -160,12 +202,6 @@ struct GlobeView: View {
         .font(.caption2)
         .padding(10)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    /// Looks up the selected satellite for overlay display.
-    private var selectedSatellite: TrackedSatellite? {
-        guard let selectedSatelliteId else { return nil }
-        return viewModel.trackedSatellites.first { $0.satellite.id == selectedSatelliteId }
     }
 
     /// Converts degree sliders into radians for SceneKit math.
@@ -183,6 +219,81 @@ struct GlobeView: View {
         satelliteYawFollowsOrbit = SatelliteRenderConfig.debugDefaults.yawFollowsOrbit
     }
     #endif
+
+    /// Looks up the selected satellite for overlay display.
+    private var selectedSatellite: TrackedSatellite? {
+        guard let selectedSatelliteId else { return nil }
+        return viewModel.trackedSatellites.first { $0.satellite.id == selectedSatelliteId }
+    }
+
+    /// Converts the persisted raw value into a user-facing orbit path mode.
+    private var orbitPathMode: OrbitPathMode {
+        OrbitPathMode(rawValue: orbitPathModeRaw) ?? .selectedOnly
+    }
+
+    /// Binds the orbit path mode to its persisted raw value.
+    private var orbitPathModeBinding: Binding<OrbitPathMode> {
+        Binding(
+            get: { orbitPathMode },
+            set: { orbitPathModeRaw = $0.rawValue }
+        )
+    }
+
+    /// Builds the top-right settings button for globe options.
+    private var settingsButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isSettingsExpanded.toggle()
+            }
+        } label: {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.primary)
+                .padding(10)
+                .background(.thinMaterial, in: Circle())
+        }
+        .accessibilityLabel("Globe Settings")
+    }
+
+    /// Presents a compact settings card with globe-specific toggles.
+    private var settingsPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Globe Settings")
+                .font(.subheadline.weight(.semibold))
+
+            Toggle("Directional Light", isOn: $directionalLightEnabled)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Orbit Paths")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("Orbit Paths", selection: orbitPathModeBinding) {
+                    ForEach(OrbitPathMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(.white.opacity(0.15), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 12, x: 0, y: 6)
+        .frame(maxWidth: 260)
+    }
+
+    /// Provides the debug stats callback when the build supports it.
+    private var statsHandler: ((GlobeRenderStats) -> Void)? {
+        #if DEBUG
+        return { renderStats = $0 }
+        #else
+        return nil
+        #endif
+    }
 
     /// Detects when the view is running in Xcode previews.
     private var isPreview: Bool {

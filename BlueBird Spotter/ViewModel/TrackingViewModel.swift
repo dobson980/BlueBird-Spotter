@@ -30,6 +30,8 @@ final class TrackingViewModel {
     var state: LoadState<[TrackedSatellite]> = .idle
     /// Timestamp of the most recent update.
     var lastUpdatedAt: Date?
+    /// Timestamp of the most recent TLE fetch that seeded tracking.
+    var lastTLEFetchedAt: Date?
 
     /// Designated initializer that supports dependency injection for tests.
     init(
@@ -57,6 +59,7 @@ final class TrackingViewModel {
                 await MainActor.run {
                     self.trackedSatellites = []
                     self.lastUpdatedAt = nil
+                    self.lastTLEFetchedAt = result.fetchedAt
                 }
 
                 for await tick in ticker.ticks() {
@@ -82,12 +85,14 @@ final class TrackingViewModel {
                     self.state = .error(error.localizedDescription)
                     self.trackedSatellites = []
                     self.lastUpdatedAt = nil
+                    self.lastTLEFetchedAt = nil
                 }
             } catch {
                 await MainActor.run {
                     self.state = .error("An unexpected error occurred: \(error)")
                     self.trackedSatellites = []
                     self.lastUpdatedAt = nil
+                    self.lastTLEFetchedAt = nil
                 }
             }
         }
