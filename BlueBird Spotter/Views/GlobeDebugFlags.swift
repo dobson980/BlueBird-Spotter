@@ -18,10 +18,16 @@ enum GlobeDebugFlags {
     static var showDebugMarkers: Bool {
         ProcessInfo.processInfo.environment["GLOBE_DEBUG_MARKERS"] == "1"
     }
+    /// Shows basic render statistics to diagnose missing scene content.
+    static var showRenderStats: Bool {
+        ProcessInfo.processInfo.environment["GLOBE_DEBUG_STATS"] == "1"
+    }
     #else
     /// Hides debug UI in production.
     static let showTuningUI = false
     /// Hides debug markers in production.
     static let showDebugMarkers = false
+    /// Hides render stats in production.
+    static let showRenderStats = false
     #endif
 }

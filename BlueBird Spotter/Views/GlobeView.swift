@@ -13,6 +13,10 @@ struct GlobeView: View {
     @State private var viewModel: TrackingViewModel
     /// Currently selected satellite for the detail overlay.
     @State private var selectedSatelliteId: Int?
+    #if DEBUG
+    /// Latest render diagnostics for debugging missing content.
+    @State private var renderStats: GlobeRenderStats?
+    #endif
 
     #if DEBUG
     /// Adjusts the satellite model scale for SceneKit.
@@ -39,6 +43,8 @@ struct GlobeView: View {
             GlobeSceneView(
                 trackedSatellites: viewModel.trackedSatellites,
                 config: satelliteRenderConfig,
+                selectedSatelliteId: selectedSatelliteId,
+                onStats: statsHandler,
                 onSelect: { selectedSatelliteId = $0 }
             )
 
@@ -53,6 +59,11 @@ struct GlobeView: View {
                 renderControls
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+            if GlobeDebugFlags.showRenderStats {
+                renderStatsOverlay
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
             #endif
         }
@@ -77,7 +88,10 @@ struct GlobeView: View {
             basePitch: degreesToRadians(satelliteBasePitchDegrees),
             baseRoll: degreesToRadians(satelliteBaseRollDegrees),
             nadirPointing: satelliteNadirPointing,
-            yawFollowsOrbit: satelliteYawFollowsOrbit
+            yawFollowsOrbit: satelliteYawFollowsOrbit,
+            detailMode: .lowWithHighForSelection,
+            maxDetailModels: 1,
+            lodDistances: SatelliteRenderConfig.debugDefaults.lodDistances
         )
         #else
         SatelliteRenderConfig.productionDefaults
@@ -121,6 +135,31 @@ struct GlobeView: View {
         .font(.caption)
         .padding(12)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Provides the debug stats callback when the build supports it.
+    private var statsHandler: ((GlobeRenderStats) -> Void)? {
+        #if DEBUG
+        return { renderStats = $0 }
+        #else
+        return nil
+        #endif
+    }
+
+    /// Builds a lightweight debug readout for globe rendering stats.
+    private var renderStatsOverlay: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Globe Stats")
+                .font(.headline)
+            Text("Tracked: \(viewModel.trackedSatellites.count)")
+            Text("Nodes: \(renderStats?.nodeCount ?? 0)")
+            Text("Template Loaded: \(renderStats?.templateLoaded == true ? "Yes" : "No")")
+            Text("Uses Models: \(renderStats?.usesModelTemplates == true ? "Yes" : "No")")
+            Text("Simulator: \(renderStats?.isSimulator == true ? "Yes" : "No")")
+        }
+        .font(.caption2)
+        .padding(10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
     /// Looks up the selected satellite for overlay display.
