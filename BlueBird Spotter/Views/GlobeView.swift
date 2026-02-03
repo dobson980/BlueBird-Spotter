@@ -14,22 +14,47 @@ struct GlobeView: View {
     /// Currently selected satellite for the detail overlay.
     @State private var selectedSatelliteId: Int?
 
+    #if DEBUG
+    /// Adjusts the satellite model scale for SceneKit.
+    @AppStorage("globe.satellite.scale") private var satelliteScale: Double = Double(SatelliteRenderConfig.debugDefaults.scale)
+    /// Yaw offset (degrees) applied after the computed attitude.
+    @AppStorage("globe.satellite.baseYawDegrees") private var satelliteBaseYawDegrees: Double = 0
+    /// Pitch offset (degrees) applied after the computed attitude.
+    @AppStorage("globe.satellite.basePitchDegrees") private var satelliteBasePitchDegrees: Double = 0
+    /// Roll offset (degrees) applied after the computed attitude.
+    @AppStorage("globe.satellite.baseRollDegrees") private var satelliteBaseRollDegrees: Double = 0
+    /// Enables nadir pointing so satellites face Earth.
+    @AppStorage("globe.satellite.nadirPointing") private var satelliteNadirPointing = SatelliteRenderConfig.debugDefaults.nadirPointing
+    /// Rotates the satellite around the radial axis to follow velocity.
+    @AppStorage("globe.satellite.yawFollowsOrbit") private var satelliteYawFollowsOrbit = SatelliteRenderConfig.debugDefaults.yawFollowsOrbit
+    #endif
+
     /// Allows previews to inject a prepared view model.
     init(viewModel: TrackingViewModel = TrackingViewModel()) {
         _viewModel = State(initialValue: viewModel)
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             GlobeSceneView(
                 trackedSatellites: viewModel.trackedSatellites,
+                config: satelliteRenderConfig,
                 onSelect: { selectedSatelliteId = $0 }
             )
 
             if let selected = selectedSatellite {
                 GlobeSelectionOverlay(trackedSatellite: selected)
                     .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
+
+            #if DEBUG
+            if GlobeDebugFlags.showTuningUI {
+                renderControls
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+            #endif
         }
         .task {
             guard !isPreview else { return }
@@ -42,15 +67,91 @@ struct GlobeView: View {
         }
     }
 
+    /// Bundle all tuning knobs into a single config for SceneKit.
+    private var satelliteRenderConfig: SatelliteRenderConfig {
+        #if DEBUG
+        SatelliteRenderConfig(
+            useModel: true,
+            scale: Float(satelliteScale),
+            baseYaw: degreesToRadians(satelliteBaseYawDegrees),
+            basePitch: degreesToRadians(satelliteBasePitchDegrees),
+            baseRoll: degreesToRadians(satelliteBaseRollDegrees),
+            nadirPointing: satelliteNadirPointing,
+            yawFollowsOrbit: satelliteYawFollowsOrbit
+        )
+        #else
+        SatelliteRenderConfig.productionDefaults
+        #endif
+    }
+
+    #if DEBUG
+    /// Builds the live tuning overlay for scale and rotation offsets.
+    private var renderControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Satellite Tuning")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Scale: \(satelliteScale, specifier: "%.3f")")
+                Slider(value: $satelliteScale, in: 0.001...0.05)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Yaw Offset: \(satelliteBaseYawDegrees, specifier: "%.0f")°")
+                Slider(value: $satelliteBaseYawDegrees, in: -180...180, step: 1)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Pitch Offset: \(satelliteBasePitchDegrees, specifier: "%.0f")°")
+                Slider(value: $satelliteBasePitchDegrees, in: -180...180, step: 1)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Roll Offset: \(satelliteBaseRollDegrees, specifier: "%.0f")°")
+                Slider(value: $satelliteBaseRollDegrees, in: -180...180, step: 1)
+            }
+
+            Toggle("Nadir Pointing", isOn: $satelliteNadirPointing)
+            Toggle("Yaw Follows Orbit", isOn: $satelliteYawFollowsOrbit)
+
+            Button("Reset") {
+                resetRenderControls()
+            }
+        }
+        .font(.caption)
+        .padding(12)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
     /// Looks up the selected satellite for overlay display.
     private var selectedSatellite: TrackedSatellite? {
         guard let selectedSatelliteId else { return nil }
         return viewModel.trackedSatellites.first { $0.satellite.id == selectedSatelliteId }
     }
 
+    /// Converts degree sliders into radians for SceneKit math.
+    private func degreesToRadians(_ value: Double) -> Float {
+        Float(value * .pi / 180)
+    }
+
+    /// Restores slider settings to a predictable baseline.
+    private func resetRenderControls() {
+        satelliteScale = Double(SatelliteRenderConfig.debugDefaults.scale)
+        satelliteBaseYawDegrees = 0
+        satelliteBasePitchDegrees = 0
+        satelliteBaseRollDegrees = 0
+        satelliteNadirPointing = SatelliteRenderConfig.debugDefaults.nadirPointing
+        satelliteYawFollowsOrbit = SatelliteRenderConfig.debugDefaults.yawFollowsOrbit
+    }
+    #endif
+
     /// Detects when the view is running in Xcode previews.
     private var isPreview: Bool {
-        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+        let env = ProcessInfo.processInfo.environment
+        if env["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+            return true
+        }
+        return Bundle.main.bundlePath.contains("Previews")
     }
 }
 
@@ -94,7 +195,7 @@ private extension TrackingViewModel {
         let now = Date()
         let sampleSatellite = Satellite(
             id: 67890,
-            name: "BLUEBIRD-GLOBE",
+            name: "BLUEBIRD-XXX",
             tleLine1: "1 67890U 98067A   20344.12345678  .00001234  00000-0  10270-3 0  9991",
             tleLine2: "2 67890  51.6431  21.2862 0007417  92.3844  10.1234 15.48912345123456",
             epoch: now
