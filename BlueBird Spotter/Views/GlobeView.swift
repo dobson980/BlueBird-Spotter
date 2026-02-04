@@ -32,7 +32,9 @@ struct GlobeView: View {
     /// Pitch offset (degrees) applied after the computed attitude.
     @AppStorage("globe.satellite.basePitchDegrees") private var satelliteBasePitchDegrees: Double = 0
     /// Roll offset (degrees) applied after the computed attitude.
-    @AppStorage("globe.satellite.baseRollDegrees") private var satelliteBaseRollDegrees: Double = 0
+    @AppStorage("globe.satellite.baseRollDegrees") private var satelliteBaseRollDegrees: Double = 45
+    /// Heading offset (degrees) applied around the radial axis.
+    @AppStorage("globe.satellite.orbitHeadingDegrees") private var satelliteOrbitHeadingDegrees: Double = 45
     /// Enables nadir pointing so satellites face Earth.
     @AppStorage("globe.satellite.nadirPointing") private var satelliteNadirPointing = SatelliteRenderConfig.debugDefaults.nadirPointing
     /// Rotates the satellite around the radial axis to follow velocity.
@@ -140,6 +142,7 @@ struct GlobeView: View {
             baseRoll: degreesToRadians(satelliteBaseRollDegrees),
             nadirPointing: satelliteNadirPointing,
             yawFollowsOrbit: satelliteYawFollowsOrbit,
+            orbitHeadingOffset: degreesToRadians(satelliteOrbitHeadingDegrees),
             detailMode: .lowWithHighForSelection,
             maxDetailModels: 1,
             lodDistances: SatelliteRenderConfig.debugDefaults.lodDistances
@@ -174,6 +177,11 @@ struct GlobeView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Roll Offset: \(satelliteBaseRollDegrees, specifier: "%.0f")°")
                 Slider(value: $satelliteBaseRollDegrees, in: -180...180, step: 1)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Orbit Heading: \(satelliteOrbitHeadingDegrees, specifier: "%.0f")°")
+                Slider(value: $satelliteOrbitHeadingDegrees, in: -180...180, step: 1)
             }
 
             Toggle("Nadir Pointing", isOn: $satelliteNadirPointing)
@@ -215,6 +223,7 @@ struct GlobeView: View {
         satelliteBaseYawDegrees = 0
         satelliteBasePitchDegrees = 0
         satelliteBaseRollDegrees = 0
+        satelliteOrbitHeadingDegrees = 45
         satelliteNadirPointing = SatelliteRenderConfig.debugDefaults.nadirPointing
         satelliteYawFollowsOrbit = SatelliteRenderConfig.debugDefaults.yawFollowsOrbit
     }

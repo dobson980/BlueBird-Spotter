@@ -33,6 +33,11 @@ struct SatelliteRenderConfig: Equatable {
     var nadirPointing: Bool
     /// Spins the model around its radial axis to follow the velocity tangent.
     var yawFollowsOrbit: Bool
+    /// Additional heading offset applied around the radial axis (radians).
+    ///
+    /// This keeps the satellite's long face aligned with the orbit track
+    /// without changing its relationship to Earth.
+    var orbitHeadingOffset: Float
     /// Chooses whether the high-detail model is reserved for selection.
     var detailMode: SatelliteDetailMode
     /// Caps how many satellites can use the high-detail model at once.
@@ -47,10 +52,12 @@ struct SatelliteRenderConfig: Equatable {
         scale: 0.003,
         baseYaw: 0,
         basePitch: 0,
-        baseRoll: 0,
+        // Rotate the model so its body reads level relative to Earth.
+        baseRoll: .pi / 4,
         nadirPointing: true,
-        // Disable yaw-follow so satellites don't slowly spin around the radial axis by default.
-        yawFollowsOrbit: false,
+        // Align the model with its orbital heading for a consistent top-down view.
+        yawFollowsOrbit: true,
+        orbitHeadingOffset: .pi / 4,
         detailMode: .lowWithHighForSelection,
         maxDetailModels: 1,
         lodDistances: [2.0]
@@ -62,9 +69,11 @@ struct SatelliteRenderConfig: Equatable {
         scale: 0.003,
         baseYaw: 0,
         basePitch: 0,
-        baseRoll: 0,
+        // Matches production to keep debug previews consistent.
+        baseRoll: .pi / 4,
         nadirPointing: true,
-        yawFollowsOrbit: false,
+        yawFollowsOrbit: true,
+        orbitHeadingOffset: .pi / 4,
         detailMode: .lowWithHighForSelection,
         maxDetailModels: 1,
         lodDistances: [2.0]

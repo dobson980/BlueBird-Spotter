@@ -277,6 +277,8 @@ struct GlobeSceneView: UIViewRepresentable {
         private var nodeUsesModel: [Int: Bool] = [:]
         /// Last scale applied to model nodes so we avoid redundant updates.
         private var lastScale: Float?
+        /// Remembers whether yaw-following was enabled last tick to reset caches.
+        private var lastYawFollowsOrbit: Bool?
         /// Tracks the last applied directional light state to avoid redundant work.
         private var lastDirectionalLightEnabled: Bool?
         /// Cached orbital path nodes keyed by shared orbital signatures.
@@ -319,6 +321,13 @@ struct GlobeSceneView: UIViewRepresentable {
             if shouldUseModel != currentUseModel {
                 resetSatelliteNodes()
                 currentUseModel = shouldUseModel
+            }
+
+            if lastYawFollowsOrbit != renderConfig.yawFollowsOrbit {
+                // Clear cached axes so we don't keep velocity-based roll when toggling modes.
+                lastRightAxis.removeAll()
+                lastOrientation.removeAll()
+                lastYawFollowsOrbit = renderConfig.yawFollowsOrbit
             }
 
             updateLodIfNeeded()
@@ -1007,8 +1016,13 @@ struct GlobeSceneView: UIViewRepresentable {
             let basis = simd_float3x3(columns: (right, up, outward))
             let orientation = simd_quatf(basis)
 
+            // Apply a heading offset around the radial axis to align the long face with the orbit line.
+            let headingOffset = config.orbitHeadingOffset
+            let headingRotation = headingOffset == 0
+                ? simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+                : simd_quatf(angle: headingOffset, axis: outward)
             // Apply base offsets after attitude so artists can correct model alignment.
-            let targetOrientation = orientation * baseOffset
+            let targetOrientation = headingRotation * orientation * baseOffset
             if let last = lastOrientation[id] {
                 // Slerp smooths orientation changes to prevent visible snapping on tick boundaries.
                 node.simdOrientation = simd_slerp(last, targetOrientation, 0.35)
@@ -1033,15 +1047,14 @@ struct GlobeSceneView: UIViewRepresentable {
                     let velocityDir = velocity / velocityLength
                     let projected = velocityDir - radial * simd_dot(velocityDir, radial)
                     if simd_length(projected) > 0.0001 {
-                        let stabilized = simd_normalize(projected)
+                        var stabilized = simd_normalize(projected)
+                        if let cached = lastRightAxis[id], simd_dot(stabilized, cached) < 0 {
+                            stabilized = -stabilized
+                        }
                         lastRightAxis[id] = stabilized
                         return stabilized
                     }
                 }
-            }
-
-            if let cached = lastRightAxis[id] {
-                return cached
             }
 
             let worldUp = simd_float3(0, 1, 0)
@@ -1053,6 +1066,7 @@ struct GlobeSceneView: UIViewRepresentable {
             lastRightAxis[id] = stabilized
             return stabilized
         }
+
 
         /// Builds the base yaw/pitch/roll offsets as a quaternion.
         private func baseOrientationQuaternion(for config: SatelliteRenderConfig) -> simd_quatf {
