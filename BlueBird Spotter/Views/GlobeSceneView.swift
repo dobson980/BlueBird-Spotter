@@ -41,6 +41,12 @@ struct GlobeSceneView: UIViewRepresentable {
     private static let ambientLightIntensity: CGFloat = 40
     /// Slightly brighter ambient when the directional light is disabled.
     private static let ambientLightIntensityWhenDirectionalOff: CGFloat = 380
+    /// Category mask used to render satellites.
+    private static let satelliteCategoryMask = 1 << 0
+    /// Category mask used to render orbital paths.
+    private static let orbitPathCategoryMask = 1 << 1
+    /// Combined mask for camera visibility (satellites + orbit paths).
+    private static let sceneContentCategoryMask = satelliteCategoryMask | orbitPathCategoryMask
 
     /// Latest tracked satellite positions to render.
     let trackedSatellites: [TrackedSatellite]
@@ -115,6 +121,8 @@ struct GlobeSceneView: UIViewRepresentable {
         let camera = SCNCamera()
         camera.zNear = 0.05
         camera.zFar = 12
+        // Render both satellites and orbit paths (camera culls by category bit mask).
+        camera.categoryBitMask = Self.sceneContentCategoryMask
         let cameraNode = SCNNode()
         cameraNode.camera = camera
         cameraNode.position = SCNVector3(0, 0, 3)
@@ -250,6 +258,10 @@ struct GlobeSceneView: UIViewRepresentable {
             case low
         }
 
+        /// Category mask used for satellite hit testing.
+        private let satelliteCategoryMask = GlobeSceneView.satelliteCategoryMask
+        /// Category mask used for orbital path visuals.
+        private let orbitPathCategoryMask = GlobeSceneView.orbitPathCategoryMask
         /// Limits how many orbit paths build concurrently to keep the UI responsive.
         private static let maxConcurrentOrbitPathBuilds = 2
 
@@ -491,7 +503,9 @@ struct GlobeSceneView: UIViewRepresentable {
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard let view = view else { return }
             let point = gesture.location(in: view)
-            let hits = view.hitTest(point, options: nil)
+            let hits = view.hitTest(point, options: [
+                SCNHitTestOption.categoryBitMask: satelliteCategoryMask
+            ])
             guard let hitNode = hits.first?.node else {
                 onSelect(nil)
                 return
@@ -526,6 +540,7 @@ struct GlobeSceneView: UIViewRepresentable {
 
             let name = String(tracked.satellite.id)
             applyName(name, to: node)
+            applyCategory(satelliteCategoryMask, to: node)
 
             scene.rootNode.addChildNode(node)
             satelliteNodes[tracked.satellite.id] = node
@@ -864,7 +879,10 @@ struct GlobeSceneView: UIViewRepresentable {
             material.readsFromDepthBuffer = true
             geometry.materials = [material]
 
-            return SCNNode(geometry: geometry)
+            let node = SCNNode(geometry: geometry)
+            // Orbit paths are visual-only; keep them out of satellite hit testing.
+            node.categoryBitMask = orbitPathCategoryMask
+            return node
         }
 
         /// Builds the index list for consecutive line segments.
@@ -1093,6 +1111,14 @@ struct GlobeSceneView: UIViewRepresentable {
             node.name = name
             for child in node.childNodes {
                 applyName(name, to: child)
+            }
+        }
+
+        /// Applies a SceneKit category bitmask to the node hierarchy.
+        private func applyCategory(_ mask: Int, to node: SCNNode) {
+            node.categoryBitMask = mask
+            for child in node.childNodes {
+                applyCategory(mask, to: child)
             }
         }
 
