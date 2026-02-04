@@ -356,15 +356,17 @@ struct GlobeSceneView: UIViewRepresentable {
             }
 
             let tickTimestamp = tracked.first?.position.timestamp
+            let previousTickTimestamp = lastTickTimestamp
             let animationDuration: TimeInterval
-            if let tickTimestamp, let lastTickTimestamp {
-                let delta = tickTimestamp.timeIntervalSince(lastTickTimestamp)
+            if let tickTimestamp, let previousTickTimestamp {
+                let delta = tickTimestamp.timeIntervalSince(previousTickTimestamp)
                 animationDuration = max(0, min(delta, 1.5))
             } else {
                 animationDuration = 0
             }
             lastTickTimestamp = tickTimestamp
             lastAnimationDuration = animationDuration
+            let hasNewTick = tickTimestamp != nil && tickTimestamp != previousTickTimestamp
 
             var updates: [(id: Int, node: SCNNode, position: SCNVector3)] = []
             updates.reserveCapacity(tracked.count)
@@ -409,7 +411,12 @@ struct GlobeSceneView: UIViewRepresentable {
             SCNTransaction.disableActions = true
             let shouldApplyScale = lastScale != renderConfig.scale
             for update in updates {
-                applyOrientation(for: update.id, node: update.node, currentPosition: update.position)
+                if hasNewTick || lastOrientation[update.id] == nil {
+                    // Only recompute attitude when we receive a new ephemeris tick.
+                    // This prevents selection taps from briefly snapping the model
+                    // to a fallback axis when the position hasn't advanced yet.
+                    applyOrientation(for: update.id, node: update.node, currentPosition: update.position)
+                }
                 if shouldUseModel, nodeUsesModel[update.id] == true {
                     let scale = renderConfig.scale
                     if shouldApplyScale || update.node.scale.x != scale {
