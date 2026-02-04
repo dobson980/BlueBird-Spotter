@@ -14,6 +14,8 @@ import SwiftUI
 struct TLEListView: View {
     /// Local view model state so the UI refreshes when data changes.
     @State private var viewModel: CelesTrakViewModel
+    /// Shared navigation state for cross-tab focus.
+    @Environment(AppNavigationState.self) private var navigationState
     /// Tracks light/dark mode for adaptive styling.
     @Environment(\.colorScheme) private var colorScheme
     /// Fixed query key used across the demo views.
@@ -70,6 +72,12 @@ struct TLEListView: View {
                         ForEach(tles, id: \.line1) { tle in
                             tleRow(tle)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    // Tap a row to jump to the globe and focus the satellite.
+                                    guard let id = SatelliteIDParser.parseNoradId(line1: tle.line1) else { return }
+                                    navigationState.focusOnSatellite(id: id)
+                                }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

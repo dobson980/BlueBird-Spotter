@@ -13,6 +13,8 @@ import SwiftUI
 struct TrackingView: View {
     /// Local view model state so the UI refreshes with tracking updates.
     @State private var viewModel: TrackingViewModel
+    /// Shared navigation state for cross-tab focus.
+    @Environment(AppNavigationState.self) private var navigationState
     /// Tracks light/dark mode for adaptive styling.
     @Environment(\.colorScheme) private var colorScheme
     /// Fixed query key used to drive the tracking session.
@@ -74,6 +76,11 @@ struct TrackingView: View {
                         ForEach(sortedSatellites) { tracked in
                             trackingRow(tracked)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    // Tap a row to jump to the globe and focus the satellite.
+                                    navigationState.focusOnSatellite(id: tracked.satellite.id)
+                                }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

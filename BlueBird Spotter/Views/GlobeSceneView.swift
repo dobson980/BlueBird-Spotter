@@ -60,6 +60,8 @@ struct GlobeSceneView: UIViewRepresentable {
     let orbitPathMode: OrbitPathMode
     /// Rendering configuration for orbital paths.
     let orbitPathConfig: OrbitPathConfig
+    /// Optional focus request to center the camera on a satellite.
+    let focusRequest: SatelliteFocusRequest?
     /// Optional debug hook for exposing render stats to SwiftUI overlays.
     let onStats: ((GlobeRenderStats) -> Void)?
     /// Notifies SwiftUI when the user taps a satellite node.
@@ -75,6 +77,8 @@ struct GlobeSceneView: UIViewRepresentable {
         view.allowsCameraControl = true
         view.cameraControlConfiguration.allowsTranslation = false
         view.autoenablesDefaultLighting = false
+        // Force SceneKit to use our named camera so focus animations are visible.
+        view.pointOfView = view.scene?.rootNode.childNode(withName: "globeCamera", recursively: false)
 
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         view.addGestureRecognizer(tap)
@@ -91,6 +95,11 @@ struct GlobeSceneView: UIViewRepresentable {
             trackedSatellites,
             in: scene,
             selectedId: selectedSatelliteId
+        )
+        context.coordinator.updateCameraFocus(
+            request: focusRequest,
+            tracked: trackedSatellites,
+            in: scene
         )
         context.coordinator.updateOrbitPaths(
             for: trackedSatellites,
@@ -125,6 +134,7 @@ struct GlobeSceneView: UIViewRepresentable {
         camera.categoryBitMask = Self.sceneContentCategoryMask
         let cameraNode = SCNNode()
         cameraNode.camera = camera
+        cameraNode.name = "globeCamera"
         cameraNode.position = SCNVector3(0, 0, 3)
         scene.rootNode.addChildNode(cameraNode)
 
@@ -303,11 +313,16 @@ struct GlobeSceneView: UIViewRepresentable {
         private var lastOrbitPathSampleCount: Int?
         /// Latest Earth-rotation alignment applied to orbit path nodes.
         private var lastOrbitRotation: simd_quatf?
+        /// Tracks the most recent camera focus request token.
+        private var lastFocusToken: UUID?
+        /// Stores a focus request until the satellite node exists.
+        private var pendingFocusRequest: SatelliteFocusRequest?
         /// Latest tuning knobs from SwiftUI.
         var renderConfig: SatelliteRenderConfig
         private let onSelect: (Int?) -> Void
         private let onStats: ((GlobeRenderStats) -> Void)?
         weak var view: SCNView?
+        private weak var cameraNode: SCNNode?
 
         init(
             onSelect: @escaping (Int?) -> Void,
@@ -325,6 +340,9 @@ struct GlobeSceneView: UIViewRepresentable {
             in scene: SCNScene,
             selectedId: Int?
         ) {
+            if cameraNode == nil {
+                cameraNode = scene.rootNode.childNode(withName: "globeCamera", recursively: false)
+            }
             var shouldUseModel = renderConfig.useModel && !GlobeSceneView.isRunningInPreview
             if shouldUseModel {
                 loadSatelliteTemplates()
@@ -450,6 +468,42 @@ struct GlobeSceneView: UIViewRepresentable {
                 sunNode?.light?.castsShadow = false
                 ambientNode?.light?.intensity = GlobeSceneView.ambientLightIntensityWhenDirectionalOff
             }
+        }
+
+        /// Centers the camera on a satellite when a focus request is issued.
+        func updateCameraFocus(
+            request: SatelliteFocusRequest?,
+            tracked _: [TrackedSatellite],
+            in scene: SCNScene
+        ) {
+            if let request, lastFocusToken != request.token {
+                lastFocusToken = request.token
+                pendingFocusRequest = request
+            }
+
+            guard let pending = pendingFocusRequest else { return }
+            guard let targetNode = satelliteNodes[pending.satelliteId] else { return }
+            guard let cameraNode = cameraNode else { return }
+            view?.pointOfView = cameraNode
+
+            let position = targetNode.position
+            let direction = position.simd
+            let distance = simd_length(direction)
+            guard distance > 0 else { return }
+
+            // Keep a fixed distance so the satellite always lands at a readable size.
+            let desiredDistance = GlobeSceneView.earthRadiusScene * 2.2
+            let targetPosition = direction / distance * desiredDistance
+
+            SCNTransaction.begin()
+            SCNTransaction.disableActions = false
+            SCNTransaction.animationDuration = 0.45
+            SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            cameraNode.position = SCNVector3(targetPosition.x, targetPosition.y, targetPosition.z)
+            cameraNode.look(at: position)
+            SCNTransaction.commit()
+
+            pendingFocusRequest = nil
         }
 
         /// Renders orbital paths based on the selected mode, deduping shared orbits.

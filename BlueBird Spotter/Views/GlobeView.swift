@@ -13,6 +13,8 @@ struct GlobeView: View {
     @State private var viewModel: TrackingViewModel
     /// Currently selected satellite for the detail overlay.
     @State private var selectedSatelliteId: Int?
+    /// Shared navigation state for cross-tab focus.
+    @Environment(AppNavigationState.self) private var navigationState
     /// Stores the persisted directional light toggle.
     @AppStorage("globe.light.directional.enabled") private var directionalLightEnabled = true
     /// Stores the persisted orbit path mode selection.
@@ -57,6 +59,7 @@ struct GlobeView: View {
                 isDirectionalLightEnabled: directionalLightEnabled,
                 orbitPathMode: orbitPathMode,
                 orbitPathConfig: OrbitPathConfig.default,
+                focusRequest: navigationState.focusRequest,
                 onStats: statsHandler,
                 onSelect: { selectedSatelliteId = $0 }
             )
@@ -116,6 +119,12 @@ struct GlobeView: View {
         .onDisappear {
             // Cancels tracking to avoid background work when the tab is hidden.
             viewModel.stopTracking()
+        }
+        .onChange(of: navigationState.focusRequest?.token) { _ in
+            // Mirror focus requests into selection so the overlay/high detail stays in sync.
+            if let request = navigationState.focusRequest {
+                selectedSatelliteId = request.satelliteId
+            }
         }
     }
 
