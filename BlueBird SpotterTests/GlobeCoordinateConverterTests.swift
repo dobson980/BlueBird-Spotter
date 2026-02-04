@@ -15,7 +15,7 @@ struct GlobeCoordinateConverterTests {
     /// Equator + prime meridian should land on the positive Z axis.
     @Test func equatorPrimeMeridian_mapsToPositiveZ() {
         let position = GlobeCoordinateConverter.scenePosition(
-            from: SatellitePosition(timestamp: Date(), latitudeDegrees: 0, longitudeDegrees: 0, altitudeKm: 0),
+            from: SatellitePosition(timestamp: Date(), latitudeDegrees: 0, longitudeDegrees: 0, altitudeKm: 0, velocityKmPerSec: nil),
             earthRadiusScene: 1.0
         )
         #expect(abs(position.x) < 1e-6)
@@ -26,7 +26,7 @@ struct GlobeCoordinateConverterTests {
     /// Equator + 90E longitude should land on the positive X axis.
     @Test func equatorEastLongitude_mapsToPositiveX() {
         let position = GlobeCoordinateConverter.scenePosition(
-            from: SatellitePosition(timestamp: Date(), latitudeDegrees: 0, longitudeDegrees: 90, altitudeKm: 0),
+            from: SatellitePosition(timestamp: Date(), latitudeDegrees: 0, longitudeDegrees: 90, altitudeKm: 0, velocityKmPerSec: nil),
             earthRadiusScene: 1.0
         )
         #expect(abs(position.x - 1.0) < 1e-6)
@@ -37,7 +37,7 @@ struct GlobeCoordinateConverterTests {
     /// North pole should land on the positive Y axis.
     @Test func northPole_mapsToYAxis() {
         let position = GlobeCoordinateConverter.scenePosition(
-            from: SatellitePosition(timestamp: Date(), latitudeDegrees: 90, longitudeDegrees: 0, altitudeKm: 0),
+            from: SatellitePosition(timestamp: Date(), latitudeDegrees: 90, longitudeDegrees: 0, altitudeKm: 0, velocityKmPerSec: nil),
             earthRadiusScene: 1.0
         )
         #expect(abs(position.x) < 1e-6)

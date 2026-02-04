@@ -337,7 +337,8 @@ private extension TrackingViewModel {
             timestamp: now,
             latitudeDegrees: 37.77,
             longitudeDegrees: -122.42,
-            altitudeKm: 550.2
+            altitudeKm: 550.2,
+            velocityKmPerSec: nil
         )
         let tracked = [TrackedSatellite(satellite: sampleSatellite, position: samplePosition)]
         viewModel.trackedSatellites = tracked

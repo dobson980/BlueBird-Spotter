@@ -28,13 +28,20 @@ struct SGP4OrbitEngine: OrbitEngine {
             pvCoordinates.position.y / 1000.0,
             pvCoordinates.position.z / 1000.0
         )
+        // Velocity in km/s (TEME frame) for orbit-following orientation.
+        let velocity = SIMD3(
+            pvCoordinates.velocity.x / 1000.0,
+            pvCoordinates.velocity.y / 1000.0,
+            pvCoordinates.velocity.z / 1000.0
+        )
         let geodetic = EarthCoordinateConverter.temeToGeodetic(position: eciPosition, at: date)
 
         return SatellitePosition(
             timestamp: date,
             latitudeDegrees: geodetic.latitudeDegrees,
             longitudeDegrees: geodetic.longitudeDegrees,
-            altitudeKm: geodetic.altitudeKm
+            altitudeKm: geodetic.altitudeKm,
+            velocityKmPerSec: velocity
         )
     }
 }

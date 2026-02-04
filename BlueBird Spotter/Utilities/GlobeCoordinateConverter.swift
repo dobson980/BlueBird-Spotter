@@ -66,4 +66,40 @@ struct GlobeCoordinateConverter {
 
         return SCNVector3(x, y, z)
     }
+
+    /// Converts a TEME-frame velocity into a scene-space direction vector.
+    ///
+    /// The velocity is transformed from ECI (TEME) to the scene coordinate system
+    /// and normalized for use as a direction. The scene convention is:
+    /// +Y is north pole, +Z is prime meridian (lon 0), +X is lon 90E.
+    ///
+    /// - Parameters:
+    ///   - velocityKmPerSec: Velocity in km/s (TEME frame).
+    ///   - at: The date for Earth rotation (GMST) calculation.
+    /// - Returns: A normalized direction vector in scene coordinates.
+    nonisolated static func sceneVelocityDirection(
+        from velocityKmPerSec: SIMD3<Double>,
+        at date: Date
+    ) -> SIMD3<Float> {
+        // TEME to ECEF rotation (same as position conversion in EarthCoordinateConverter).
+        let gmst = EarthCoordinateConverter.gmstRadians(for: date)
+        let cosGmst = cos(gmst)
+        let sinGmst = sin(gmst)
+
+        // Rotate velocity from TEME (ECI) to ECEF.
+        let ecefX = velocityKmPerSec.x * cosGmst + velocityKmPerSec.y * sinGmst
+        let ecefY = -velocityKmPerSec.x * sinGmst + velocityKmPerSec.y * cosGmst
+        let ecefZ = velocityKmPerSec.z
+
+        // ECEF to SceneKit: ECEF uses X toward lon 0, Y toward lon 90E, Z toward north.
+        // SceneKit uses X toward lon 90E, Y toward north, Z toward lon 0.
+        let sceneX = Float(ecefY)   // ECEF Y (lon 90E) -> Scene X
+        let sceneY = Float(ecefZ)   // ECEF Z (north) -> Scene Y
+        let sceneZ = Float(ecefX)   // ECEF X (lon 0) -> Scene Z
+
+        let velocity = SIMD3<Float>(sceneX, sceneY, sceneZ)
+        let length = simd_length(velocity)
+        guard length > 0 else { return SIMD3<Float>(0, 0, 1) }
+        return velocity / length
+    }
 }

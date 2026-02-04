@@ -120,7 +120,7 @@ struct GlobeView: View {
             // Cancels tracking to avoid background work when the tab is hidden.
             viewModel.stopTracking()
         }
-        .onChange(of: navigationState.focusRequest?.token) { _ in
+        .onChange(of: navigationState.focusRequest?.token) { _, _ in
             // Mirror focus requests into selection so the overlay/high detail stays in sync.
             if let request = navigationState.focusRequest {
                 selectedSatelliteId = request.satelliteId
@@ -372,7 +372,8 @@ private extension TrackingViewModel {
             timestamp: now,
             latitudeDegrees: 12.34,
             longitudeDegrees: 56.78,
-            altitudeKm: 550.2
+            altitudeKm: 550.2,
+            velocityKmPerSec: nil
         )
         let tracked = [TrackedSatellite(satellite: sampleSatellite, position: samplePosition)]
         viewModel.trackedSatellites = tracked

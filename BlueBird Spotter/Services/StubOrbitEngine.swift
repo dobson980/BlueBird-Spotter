@@ -27,7 +27,8 @@ struct StubOrbitEngine: OrbitEngine {
             timestamp: date,
             latitudeDegrees: latitude,
             longitudeDegrees: longitude,
-            altitudeKm: altitude
+            altitudeKm: altitude,
+            velocityKmPerSec: nil
         )
     }
 

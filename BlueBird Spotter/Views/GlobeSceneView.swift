@@ -7,7 +7,7 @@
 
 import QuartzCore
 import SatKit
-import SceneKit
+@preconcurrency import SceneKit
 import SwiftUI
 import simd
 
@@ -47,6 +47,11 @@ struct GlobeSceneView: UIViewRepresentable {
     private static let orbitPathCategoryMask = 1 << 1
     /// Combined mask for camera visibility (satellites + orbit paths).
     private static let sceneContentCategoryMask = satelliteCategoryMask | orbitPathCategoryMask
+    /// Maximum pitch angle used to keep the camera below the poles.
+    /// Maximum camera pitch in degrees for SceneKit's camera controller.
+    private static let maxCameraPitchAngleDegrees: Float = 85
+    /// Maximum camera pitch in radians for internal clamping math.
+    private static let maxCameraPitchAngleRadians: Float = 85 * .pi / 180
 
     /// Latest tracked satellite positions to render.
     let trackedSatellites: [TrackedSatellite]
@@ -76,12 +81,43 @@ struct GlobeSceneView: UIViewRepresentable {
         view.isOpaque = false
         view.allowsCameraControl = true
         view.cameraControlConfiguration.allowsTranslation = false
+        // Turntable rotation keeps "up" fixed and feels like spinning a physical globe.
+        view.defaultCameraController.interactionMode = .orbitTurntable
+        view.defaultCameraController.target = SCNVector3Zero
+        // Limit vertical rotation to prevent flipping over the poles (degrees).
+        let maxPitch = GlobeSceneView.maxCameraPitchAngleDegrees
+        view.defaultCameraController.minimumVerticalAngle = -maxPitch
+        view.defaultCameraController.maximumVerticalAngle = maxPitch
         view.autoenablesDefaultLighting = false
         // Force SceneKit to use our named camera so focus animations are visible.
         view.pointOfView = view.scene?.rootNode.childNode(withName: "globeCamera", recursively: false)
 
+        // Remove SceneKit's built-in double-tap so our custom reset always fires.
+        view.gestureRecognizers?
+            .compactMap { $0 as? UITapGestureRecognizer }
+            .filter { $0.numberOfTapsRequired == 2 }
+            .forEach { view.removeGestureRecognizer($0) }
+
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        tap.delegate = context.coordinator
         view.addGestureRecognizer(tap)
+
+        // Double-tap resets the camera to the home position (0,0 over Africa).
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.delegate = context.coordinator
+        view.addGestureRecognizer(doubleTap)
+        tap.require(toFail: doubleTap)
+
+        // Detect pan/pinch gestures to cancel any in-flight focus animations.
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleInteraction(_:)))
+        pan.delegate = context.coordinator
+        view.addGestureRecognizer(pan)
+
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleInteraction(_:)))
+        pinch.delegate = context.coordinator
+        view.addGestureRecognizer(pinch)
+
         context.coordinator.view = view
 
         return view
@@ -136,6 +172,10 @@ struct GlobeSceneView: UIViewRepresentable {
         cameraNode.camera = camera
         cameraNode.name = "globeCamera"
         cameraNode.position = SCNVector3(0, 0, 3)
+        // Point the camera at Earth initially. We avoid using SCNLookAtConstraint
+        // because it conflicts with the arcball camera controller's inertia,
+        // causing erratic behavior when the user releases a drag gesture.
+        cameraNode.look(at: SCNVector3Zero)
         scene.rootNode.addChildNode(cameraNode)
 
         // Lighting keeps the day/night contrast while letting night lights read.
@@ -217,7 +257,8 @@ struct GlobeSceneView: UIViewRepresentable {
                 timestamp: Date(),
                 latitudeDegrees: lat,
                 longitudeDegrees: lon,
-                altitudeKm: 0
+                altitudeKm: 0,
+                velocityKmPerSec: nil
             )
             let node = SCNNode(geometry: SCNSphere(radius: 0.02))
             node.name = label
@@ -261,7 +302,7 @@ struct GlobeSceneView: UIViewRepresentable {
     }
 
     /// Coordinator stores satellite nodes to avoid re-creating geometry each tick.
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         /// Identifies which model template a satellite is currently using.
         private enum DetailTier {
             case high
@@ -317,6 +358,10 @@ struct GlobeSceneView: UIViewRepresentable {
         private var lastFocusToken: UUID?
         /// Stores a focus request until the satellite node exists.
         private var pendingFocusRequest: SatelliteFocusRequest?
+        /// Action key used to replace in-flight camera focus animations.
+        private let cameraFocusActionKey = "cameraFocusOrbit"
+        /// Home camera position for double-tap reset (0,0 over Africa).
+        private let homeCameraPosition = SCNVector3(0, 0, 3)
         /// Latest tuning knobs from SwiftUI.
         var renderConfig: SatelliteRenderConfig
         private let onSelect: (Int?) -> Void
@@ -386,7 +431,7 @@ struct GlobeSceneView: UIViewRepresentable {
             lastAnimationDuration = animationDuration
             let hasNewTick = tickTimestamp != nil && tickTimestamp != previousTickTimestamp
 
-            var updates: [(id: Int, node: SCNNode, position: SCNVector3)] = []
+            var updates: [(id: Int, node: SCNNode, position: SCNVector3, trackedSatellite: TrackedSatellite)] = []
             updates.reserveCapacity(tracked.count)
 
             for trackedSatellite in tracked {
@@ -411,7 +456,7 @@ struct GlobeSceneView: UIViewRepresentable {
                     from: trackedSatellite.position,
                     earthRadiusScene: GlobeSceneView.earthRadiusScene
                 )
-                updates.append((id: id, node: node, position: position))
+                updates.append((id: id, node: node, position: position, trackedSatellite: trackedSatellite))
             }
 
             // Animate positions so satellites glide between 1Hz tracking ticks.
@@ -433,7 +478,12 @@ struct GlobeSceneView: UIViewRepresentable {
                     // Only recompute attitude when we receive a new ephemeris tick.
                     // This prevents selection taps from briefly snapping the model
                     // to a fallback axis when the position hasn't advanced yet.
-                    applyOrientation(for: update.id, node: update.node, currentPosition: update.position)
+                    applyOrientation(
+                        for: update.id,
+                        node: update.node,
+                        currentPosition: update.position,
+                        trackedSatellite: update.trackedSatellite
+                    )
                 }
                 if shouldUseModel, nodeUsesModel[update.id] == true {
                     let scale = renderConfig.scale
@@ -483,27 +533,259 @@ struct GlobeSceneView: UIViewRepresentable {
 
             guard let pending = pendingFocusRequest else { return }
             guard let targetNode = satelliteNodes[pending.satelliteId] else { return }
+
+            // Ensure we have the camera node reference.
+            if cameraNode == nil {
+                cameraNode = scene.rootNode.childNode(withName: "globeCamera", recursively: false)
+            }
             guard let cameraNode = cameraNode else { return }
             view?.pointOfView = cameraNode
 
-            let position = targetNode.position
-            let direction = position.simd
-            let distance = simd_length(direction)
-            guard distance > 0 else { return }
+            // Get the direction from Earth's center to the satellite.
+            let satellitePosition = targetNode.position
+            let posX = satellitePosition.x
+            let posY = satellitePosition.y
+            let posZ = satellitePosition.z
 
-            // Keep a fixed distance so the satellite always lands at a readable size.
-            let desiredDistance = GlobeSceneView.earthRadiusScene * 2.2
-            let targetPosition = direction / distance * desiredDistance
+            // Validate position is not NaN or zero.
+            guard posX.isFinite && posY.isFinite && posZ.isFinite else {
+                pendingFocusRequest = nil
+                return
+            }
 
-            SCNTransaction.begin()
-            SCNTransaction.disableActions = false
-            SCNTransaction.animationDuration = 0.45
-            SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            cameraNode.position = SCNVector3(targetPosition.x, targetPosition.y, targetPosition.z)
-            cameraNode.look(at: position)
-            SCNTransaction.commit()
+            let directionLength = sqrt(posX * posX + posY * posY + posZ * posZ)
+            guard directionLength > 0.001 else {
+                pendingFocusRequest = nil
+                return
+            }
+
+            // Normalize to get direction from Earth center toward satellite.
+            let targetDirection = simd_float3(
+                posX / directionLength,
+                posY / directionLength,
+                posZ / directionLength
+            )
+
+            // Position camera at the same distance as home position.
+            let desiredDistance: Float = 3.0
+
+            animateCameraOrbit(
+                to: targetDirection,
+                distance: desiredDistance,
+                node: cameraNode
+            )
 
             pendingFocusRequest = nil
+        }
+
+        /// Animates the camera to look at a specific direction on the globe.
+        ///
+        /// The camera travels along an arc around the Earth rather than through it,
+        /// using spherical linear interpolation (slerp) to maintain constant distance.
+        /// For satellites on opposite sides, we pick a consistent intermediate path.
+        private func animateCameraOrbit(
+            to targetDirection: simd_float3,
+            distance: Float,
+            node: SCNNode
+        ) {
+            // Clamp the target direction to stay within vertical angle limits.
+            let maxPitch = GlobeSceneView.maxCameraPitchAngleRadians
+            let clampedDirection = clampDirectionToVerticalLimits(targetDirection, maxPitch: maxPitch)
+
+            // Validate end direction is finite.
+            guard clampedDirection.x.isFinite && clampedDirection.y.isFinite && clampedDirection.z.isFinite else {
+                return
+            }
+
+            // Get current camera position and compute start direction.
+            let startX = node.position.x
+            let startY = node.position.y
+            let startZ = node.position.z
+
+            // Validate start position is finite, otherwise use home position.
+            let safeStartX = startX.isFinite ? startX : 0
+            let safeStartY = startY.isFinite ? startY : 0
+            let safeStartZ = startZ.isFinite ? startZ : 3.0
+
+            let startPos = simd_float3(safeStartX, safeStartY, safeStartZ)
+            let startLength = simd_length(startPos)
+            let startDirection: simd_float3
+            if startLength > 0.001 {
+                startDirection = startPos / startLength
+            } else {
+                startDirection = simd_float3(0, 0, 1)
+            }
+
+            // Calculate angle between start and end directions.
+            let dot = simd_clamp(simd_dot(startDirection, clampedDirection), -1.0, 1.0)
+            let angle = acos(dot)
+
+            // For nearly opposite directions (> 150°), we need to pick a consistent
+            // intermediate direction to avoid ambiguity. We'll rotate horizontally
+            // (around Y axis) to keep the motion predictable.
+            let needsIntermediate = angle > 2.6 // ~150 degrees
+            let intermediateDirection: simd_float3
+            if needsIntermediate {
+                // Create a perpendicular direction in the XZ plane.
+                // Cross product of start with Y-up gives a horizontal perpendicular.
+                let yUp = simd_float3(0, 1, 0)
+                var perp = simd_cross(startDirection, yUp)
+                let perpLen = simd_length(perp)
+                if perpLen > 0.001 {
+                    perp = perp / perpLen
+                } else {
+                    // Start is pointing straight up/down, use Z axis.
+                    perp = simd_float3(0, 0, 1)
+                }
+                // Blend start direction toward this perpendicular, staying at equator-ish level.
+                let midY = (startDirection.y + clampedDirection.y) * 0.5
+                let horizontalScale = sqrt(max(0.01, 1.0 - midY * midY))
+                intermediateDirection = simd_normalize(simd_float3(perp.x * horizontalScale, midY, perp.z * horizontalScale))
+            } else {
+                intermediateDirection = simd_float3(0, 0, 0) // Not used.
+            }
+
+            node.removeAction(forKey: cameraFocusActionKey)
+
+            let duration: TimeInterval = needsIntermediate ? 0.6 : 0.45
+            let action = SCNAction.customAction(duration: duration) { [startDirection, clampedDirection, intermediateDirection, needsIntermediate, distance] actionNode, time in
+                let t = Float(time / CGFloat(duration))
+                // Smooth-step easing.
+                let easedT = t * t * (3.0 - 2.0 * t)
+
+                let interpolatedDirection: simd_float3
+                if needsIntermediate {
+                    // Two-phase slerp: start -> intermediate -> end.
+                    if easedT < 0.5 {
+                        let segmentT = easedT * 2.0
+                        interpolatedDirection = Self.slerp(from: startDirection, to: intermediateDirection, t: segmentT)
+                    } else {
+                        let segmentT = (easedT - 0.5) * 2.0
+                        interpolatedDirection = Self.slerp(from: intermediateDirection, to: clampedDirection, t: segmentT)
+                    }
+                } else {
+                    interpolatedDirection = Self.slerp(from: startDirection, to: clampedDirection, t: easedT)
+                }
+
+                // Compute position at constant distance from origin.
+                let x = interpolatedDirection.x * distance
+                let y = interpolatedDirection.y * distance
+                let z = interpolatedDirection.z * distance
+
+                // Final safety check.
+                if x.isFinite && y.isFinite && z.isFinite {
+                    actionNode.position = SCNVector3(x, y, z)
+                    // Manually compute orientation to avoid look(at:) flip issues.
+                    Self.orientCameraTowardOrigin(actionNode)
+                }
+            }
+            node.runAction(action, forKey: cameraFocusActionKey)
+        }
+
+        /// Spherical linear interpolation between two unit vectors.
+        nonisolated private static func slerp(from a: simd_float3, to b: simd_float3, t: Float) -> simd_float3 {
+            let dot = simd_clamp(simd_dot(a, b), -1.0, 1.0)
+            let angle = acos(dot)
+
+            if angle < 0.001 {
+                // Nearly identical, just return the target.
+                return b
+            }
+
+            let sinAngle = sin(angle)
+            let weightA = sin((1.0 - t) * angle) / sinAngle
+            let weightB = sin(t * angle) / sinAngle
+            return a * weightA + b * weightB
+        }
+
+        /// Points the camera at the origin while maintaining Y-up orientation.
+        nonisolated private static func orientCameraTowardOrigin(_ node: SCNNode) {
+            let position = node.position
+            // Forward direction (camera looks down -Z in its local space).
+            let forward = simd_normalize(simd_float3(-position.x, -position.y, -position.z))
+
+            // World up vector.
+            let worldUp = simd_float3(0, 1, 0)
+
+            // Right vector = forward × up (then normalize).
+            var right = simd_cross(forward, worldUp)
+            let rightLen = simd_length(right)
+            if rightLen > 0.001 {
+                right = right / rightLen
+            } else {
+                // Looking straight up or down, pick arbitrary right.
+                right = simd_float3(1, 0, 0)
+            }
+
+            // Recalculate up to ensure orthogonality.
+            let up = simd_cross(right, forward)
+
+            // Build rotation matrix (column-major for SceneKit).
+            // SceneKit camera looks down -Z, so forward = -Z, right = X, up = Y.
+            let rotationMatrix = simd_float4x4(columns: (
+                simd_float4(right.x, right.y, right.z, 0),
+                simd_float4(up.x, up.y, up.z, 0),
+                simd_float4(-forward.x, -forward.y, -forward.z, 0),
+                simd_float4(0, 0, 0, 1)
+            ))
+
+            node.simdTransform = simd_float4x4(columns: (
+                rotationMatrix.columns.0,
+                rotationMatrix.columns.1,
+                rotationMatrix.columns.2,
+                simd_float4(position.x, position.y, position.z, 1)
+            ))
+        }
+
+        /// Clamps a direction vector so it doesn't exceed the vertical angle limits.
+        ///
+        /// This keeps the camera from going directly over the poles where turntable
+        /// mode becomes unstable. Returns a unit-length direction vector.
+        nonisolated private func clampDirectionToVerticalLimits(
+            _ direction: simd_float3,
+            maxPitch: Float
+        ) -> simd_float3 {
+            let length = simd_length(direction)
+            guard length > 0.0001, length.isFinite else {
+                // Fallback: face Africa from the front.
+                return simd_float3(0, 0, 1)
+            }
+
+            let normalized = direction / length
+
+            // Guard against NaN values in input.
+            guard normalized.x.isFinite && normalized.y.isFinite && normalized.z.isFinite else {
+                return simd_float3(0, 0, 1)
+            }
+
+            // Y component determines vertical angle (pitch).
+            // sin(pitch) = y, so clamp y to sin(maxPitch).
+            let maxY = sin(maxPitch)
+            let clampedY = max(-maxY, min(maxY, normalized.y))
+
+            // Reconstruct the horizontal components to maintain unit length.
+            let horizontalScale = sqrt(max(0, 1 - clampedY * clampedY))
+            let originalHorizontal = simd_float2(normalized.x, normalized.z)
+            let originalHorizontalLength = simd_length(originalHorizontal)
+
+            let clampedHorizontal: simd_float2
+            if originalHorizontalLength > 0.0001 {
+                clampedHorizontal = (originalHorizontal / originalHorizontalLength) * horizontalScale
+            } else {
+                // If looking straight up/down, default to facing Africa (positive Z).
+                clampedHorizontal = simd_float2(0, horizontalScale)
+            }
+
+            let result = simd_float3(clampedHorizontal.x, clampedY, clampedHorizontal.y)
+
+            // Final validation: ensure result is a valid unit vector.
+            let resultLength = simd_length(result)
+            if resultLength > 0.99 && resultLength < 1.01 && result.x.isFinite && result.y.isFinite && result.z.isFinite {
+                return result
+            } else {
+                // Fallback if something went wrong.
+                return simd_float3(0, 0, 1)
+            }
         }
 
         /// Renders orbital paths based on the selected mode, deduping shared orbits.
@@ -573,6 +855,58 @@ struct GlobeSceneView: UIViewRepresentable {
             }
 
             onSelect(resolveSatelliteId(from: hitNode))
+        }
+
+        /// Resets the camera to the home position (0,0 over Africa) on double-tap.
+        @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard let view = view,
+                  let scene = view.scene else { return }
+
+            // Ensure we have the camera node reference.
+            if cameraNode == nil {
+                cameraNode = scene.rootNode.childNode(withName: "globeCamera", recursively: false)
+            }
+            guard let cameraNode = cameraNode else { return }
+            view.pointOfView = cameraNode
+            view.defaultCameraController.target = SCNVector3Zero
+
+            cameraNode.removeAction(forKey: cameraFocusActionKey)
+
+            // Use the same orbit animation to smoothly return to the home position.
+            let homeDirection = simd_normalize(simd_float3(homeCameraPosition.x, homeCameraPosition.y, homeCameraPosition.z))
+            let homeDistance = simd_length(simd_float3(homeCameraPosition.x, homeCameraPosition.y, homeCameraPosition.z))
+
+            animateCameraOrbit(
+                to: homeDirection,
+                distance: homeDistance,
+                node: cameraNode
+            )
+        }
+
+        /// Cancels any in-flight camera focus animation when the user starts dragging or zooming.
+        @objc func handleInteraction(_ gesture: UIGestureRecognizer) {
+            if gesture.state == .began {
+                // Stop the focus animation so it doesn't fight with the user's gesture.
+                cameraNode?.removeAction(forKey: cameraFocusActionKey)
+            }
+        }
+
+        /// Allows our gesture recognizers to work alongside SceneKit's built-in camera gestures.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            // Allow all our gesture recognizers to fire alongside SceneKit's camera controller.
+            return true
+        }
+
+        /// Ensures our tap/double-tap recognizers aren't blocked by SceneKit's internal gestures.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            // Let our own gestures fire without waiting on SceneKit's defaults.
+            return false
         }
 
         /// Creates a satellite node, using USDZ when available and storing it for reuse.
@@ -1062,7 +1396,12 @@ struct GlobeSceneView: UIViewRepresentable {
         }
 
         /// Computes orientation so the model points toward Earth and optionally along velocity.
-        private func applyOrientation(for id: Int, node: SCNNode, currentPosition: SCNVector3) {
+        private func applyOrientation(
+            for id: Int,
+            node: SCNNode,
+            currentPosition: SCNVector3,
+            trackedSatellite: TrackedSatellite
+        ) {
             defer { lastPositions[id] = currentPosition }
 
             let config = renderConfig
@@ -1084,11 +1423,13 @@ struct GlobeSceneView: UIViewRepresentable {
             // Model forward is assumed to be -Z, so +Z points away from Earth.
             let outward = position / distance
             let radial = -outward
+
             let right = preferredRightAxis(
                 for: id,
                 radial: radial,
                 outward: outward,
-                currentPosition: currentPosition
+                currentPosition: currentPosition,
+                trackedSatellite: trackedSatellite
             )
             let up = simd_normalize(simd_cross(outward, right))
 
@@ -1112,18 +1453,42 @@ struct GlobeSceneView: UIViewRepresentable {
         }
 
         /// Picks a stable right axis, favoring velocity tangent when enabled.
+        ///
+        /// Uses the provided SGP4 velocity on the first tick so satellites load with
+        /// the correct orbit-following orientation immediately. Subsequent ticks use
+        /// position delta for smoother tracking.
         private func preferredRightAxis(
             for id: Int,
             radial: simd_float3,
             outward: simd_float3,
-            currentPosition: SCNVector3
+            currentPosition: SCNVector3,
+            trackedSatellite: TrackedSatellite
         ) -> simd_float3 {
-            if renderConfig.yawFollowsOrbit,
-               let previous = lastPositions[id] {
-                let velocity = (currentPosition - previous).simd
-                let velocityLength = simd_length(velocity)
-                if velocityLength > 0 {
-                    let velocityDir = velocity / velocityLength
+            if renderConfig.yawFollowsOrbit {
+                // Try position-based velocity first (more stable for animation).
+                if let previous = lastPositions[id] {
+                    let velocity = (currentPosition - previous).simd
+                    let velocityLength = simd_length(velocity)
+                    if velocityLength > 0 {
+                        let velocityDir = velocity / velocityLength
+                        let projected = velocityDir - radial * simd_dot(velocityDir, radial)
+                        if simd_length(projected) > 0.0001 {
+                            var stabilized = simd_normalize(projected)
+                            if let cached = lastRightAxis[id], simd_dot(stabilized, cached) < 0 {
+                                stabilized = -stabilized
+                            }
+                            lastRightAxis[id] = stabilized
+                            return stabilized
+                        }
+                    }
+                }
+
+                // First tick: use SGP4-provided velocity for correct initial orientation.
+                if let velocityKmPerSec = trackedSatellite.position.velocityKmPerSec {
+                    let velocityDir = GlobeCoordinateConverter.sceneVelocityDirection(
+                        from: velocityKmPerSec,
+                        at: trackedSatellite.position.timestamp
+                    )
                     let projected = velocityDir - radial * simd_dot(velocityDir, radial)
                     if simd_length(projected) > 0.0001 {
                         var stabilized = simd_normalize(projected)
@@ -1134,6 +1499,11 @@ struct GlobeSceneView: UIViewRepresentable {
                         return stabilized
                     }
                 }
+            }
+
+            // Fallback: use cached axis or world-up.
+            if let cached = lastRightAxis[id] {
+                return cached
             }
 
             let worldUp = simd_float3(0, 1, 0)
