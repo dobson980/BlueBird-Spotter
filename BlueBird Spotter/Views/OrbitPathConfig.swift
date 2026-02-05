@@ -26,6 +26,6 @@ struct OrbitPathConfig: Equatable {
         altitudeOffsetKm: 15,
         lineColor: UIColor(red: 1.0, green: 0.47, blue: 0.0, alpha: 1.0),
         lineOpacity: 0.55,
-        lineWidth: 0.003
+        lineWidth: 0.004
     )
 }

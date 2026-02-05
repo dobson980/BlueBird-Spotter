@@ -21,11 +21,13 @@ struct GlobeView: View {
     /// Stores the persisted orbit path mode selection.
     @AppStorage("globe.orbit.mode") private var orbitPathModeRaw = OrbitPathMode.selectedOnly.rawValue
     /// Stores the persisted orbit path thickness for the ribbon.
-    @AppStorage("globe.orbit.thickness") private var orbitPathThickness: Double = 0.003
+    @AppStorage("globe.orbit.thickness") private var orbitPathThickness: Double = 0.004
     /// Stores the persisted orbit path color selection.
     @AppStorage("globe.orbit.color") private var orbitPathColorId = OrbitPathColorOption.defaultId
     /// Controls whether the globe settings panel is visible.
     @State private var isSettingsExpanded = false
+    /// A slightly longer animation keeps the glass settings panel from feeling "snappy" or jarring.
+    private let settingsPanelAnimation: Animation = .smooth(duration: 0.35)
     #if DEBUG
     /// Latest render diagnostics for debugging missing content.
     @State private var renderStats: GlobeRenderStats?
@@ -88,7 +90,7 @@ struct GlobeView: View {
                 Color.black.opacity(0.001)
                     .ignoresSafeArea()
                     .onTapGesture {
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withAnimation(settingsPanelAnimation) {
                             isSettingsExpanded = false
                         }
                     }
@@ -282,7 +284,11 @@ struct GlobeView: View {
     /// Builds the top-right settings button with a glass style.
     private var settingsButton: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(settingsPanelAnimation) {
+                // Clear selection when opening settings so the HUD does not compete for space.
+                if !isSettingsExpanded {
+                    selectedSatelliteId = nil
+                }
                 isSettingsExpanded.toggle()
             }
         } label: {
