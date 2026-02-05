@@ -150,6 +150,17 @@ struct TrackingView: View {
         String(format: "%.1f", value)
     }
 
+    /// Formats the satellite speed (magnitude of the velocity vector) in km/h.
+    private func formatVelocity(_ velocityKmPerSec: SIMD3<Double>?) -> String {
+        guard let velocityKmPerSec else { return "—" }
+        let speedKmPerSec = (velocityKmPerSec.x * velocityKmPerSec.x
+                             + velocityKmPerSec.y * velocityKmPerSec.y
+                             + velocityKmPerSec.z * velocityKmPerSec.z).squareRoot()
+        // Convert km/s to km/h for display (matches satellitetracker3d.com).
+        let speedKmPerHour = speedKmPerSec * 3600
+        return String(format: "%.0f km/h", speedKmPerHour)
+    }
+
     /// Builds a card-style row that highlights live tracking values with equal-width chips.
     private func trackingRow(_ tracked: TrackedSatellite) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -189,7 +200,7 @@ struct TrackingView: View {
     private func statGrid(for tracked: TrackedSatellite) -> some View {
         // ViewThatFits tries layouts in order and selects the first that fits.
         ViewThatFits(in: .horizontal) {
-            statGrid(columns: 3, tracked: tracked)
+            statGrid(columns: 4, tracked: tracked)
             statGrid(columns: 2, tracked: tracked)
             statGrid(columns: 1, tracked: tracked)
         }
@@ -202,6 +213,7 @@ struct TrackingView: View {
             statChip(label: "Lat", value: formatDegrees(tracked.position.latitudeDegrees))
             statChip(label: "Lon", value: formatDegrees(tracked.position.longitudeDegrees))
             statChip(label: "Alt", value: "\(formatKilometers(tracked.position.altitudeKm)) km")
+            statChip(label: "Vel", value: formatVelocity(tracked.position.velocityKmPerSec))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
