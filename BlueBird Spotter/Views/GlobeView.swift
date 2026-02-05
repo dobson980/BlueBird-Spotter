@@ -306,7 +306,7 @@ struct GlobeView: View {
             Text("Globe Settings")
                 .font(.subheadline.weight(.semibold))
 
-            Toggle("Directional Light", isOn: $directionalLightEnabled)
+            Toggle("Sunlight (Real-Time)", isOn: $directionalLightEnabled)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Orbit Paths")

@@ -11,6 +11,75 @@ import SatKit
 import SwiftUI
 import simd
 
+/// Computes the Sun's apparent direction so Earth lighting follows real UTC time.
+///
+/// The model uses standard low-cost solar equations (J2000 reference) that
+/// include axial tilt and seasonal drift, which is sufficient for real-time
+/// day/night visualization on the globe.
+private enum SolarLightingModel {
+    /// Returns a normalized scene-space direction that points from Earth to the Sun.
+    nonisolated static func sceneSunDirection(at date: Date) -> SIMD3<Float> {
+        let julianDate = date.timeIntervalSince1970 / 86_400.0 + 2_440_587.5
+        let daysSinceJ2000 = julianDate - 2_451_545.0
+
+        let meanLongitudeDegrees = normalizeDegrees(280.460 + 0.9856474 * daysSinceJ2000)
+        let meanAnomalyDegrees = normalizeDegrees(357.528 + 0.9856003 * daysSinceJ2000)
+        let meanAnomalyRadians = meanAnomalyDegrees * .pi / 180.0
+
+        let eclipticLongitudeDegrees = meanLongitudeDegrees
+            + 1.915 * sin(meanAnomalyRadians)
+            + 0.020 * sin(2.0 * meanAnomalyRadians)
+        let eclipticLongitudeRadians = eclipticLongitudeDegrees * .pi / 180.0
+        let obliquityRadians = (23.439 - 0.0000004 * daysSinceJ2000) * .pi / 180.0
+
+        let rightAscension = normalizeRadians(
+            atan2(
+                cos(obliquityRadians) * sin(eclipticLongitudeRadians),
+                cos(eclipticLongitudeRadians)
+            )
+        )
+        let declination = asin(sin(obliquityRadians) * sin(eclipticLongitudeRadians))
+
+        let gmst = EarthCoordinateConverter.gmstRadians(for: date)
+        let subsolarLongitudeRadians = normalizeRadians(rightAscension - gmst)
+        let subsolarLatitudeRadians = declination
+
+        let scenePosition = GlobeCoordinateConverter.scenePosition(
+            latitudeDegrees: subsolarLatitudeRadians * 180.0 / .pi,
+            longitudeDegrees: subsolarLongitudeRadians * 180.0 / .pi,
+            altitudeKm: 0
+        )
+        let sunDirection = SIMD3<Float>(
+            Float(scenePosition.x),
+            Float(scenePosition.y),
+            Float(scenePosition.z)
+        )
+        let length = simd_length(sunDirection)
+        guard length > .ulpOfOne else {
+            return SIMD3<Float>(0, 0, 1)
+        }
+        return sunDirection / length
+    }
+
+    /// Normalizes an angle to [0, 360) degrees.
+    nonisolated private static func normalizeDegrees(_ degrees: Double) -> Double {
+        var normalized = degrees.truncatingRemainder(dividingBy: 360.0)
+        if normalized < 0 {
+            normalized += 360.0
+        }
+        return normalized
+    }
+
+    /// Normalizes an angle to [0, 2π) radians.
+    nonisolated private static func normalizeRadians(_ radians: Double) -> Double {
+        var normalized = radians.truncatingRemainder(dividingBy: 2.0 * .pi)
+        if normalized < 0 {
+            normalized += 2.0 * .pi
+        }
+        return normalized
+    }
+}
+
 /// Snapshot of current render activity for debugging the globe view.
 struct GlobeRenderStats: Equatable {
     /// Number of tracked satellites passed in from SwiftUI.
@@ -41,6 +110,8 @@ struct GlobeSceneView: UIViewRepresentable {
     private static let ambientLightIntensity: CGFloat = 40
     /// Slightly brighter ambient when the directional light is disabled.
     private static let ambientLightIntensityWhenDirectionalOff: CGFloat = 380
+    /// Places the sunlight node far from Earth so it behaves like distant sunlight.
+    private static let sunLightNodeDistance: Float = 8
     /// Category mask used to render satellites.
     private static let satelliteCategoryMask = 1 << 0
     /// Category mask used to render orbital paths.
@@ -127,7 +198,12 @@ struct GlobeSceneView: UIViewRepresentable {
         guard let scene = uiView.scene else { return }
         context.coordinator.renderConfig = config
         context.coordinator.selectionColor = orbitPathConfig.lineColor
-        context.coordinator.updateLighting(in: scene, isDirectionalLightEnabled: isDirectionalLightEnabled)
+        let lightingDate = trackedSatellites.first?.position.timestamp ?? Date()
+        context.coordinator.updateLighting(
+            in: scene,
+            isDirectionalLightEnabled: isDirectionalLightEnabled,
+            at: lightingDate
+        )
         context.coordinator.updateSatellites(
             trackedSatellites,
             in: scene,
@@ -343,8 +419,6 @@ struct GlobeSceneView: UIViewRepresentable {
         private var lastScale: Float?
         /// Remembers whether yaw-following was enabled last tick to reset caches.
         private var lastYawFollowsOrbit: Bool?
-        /// Tracks the last applied directional light state to avoid redundant work.
-        private var lastDirectionalLightEnabled: Bool?
         /// Cached orbital path nodes keyed by shared orbital signatures.
         private var orbitPathNodes: [OrbitSignature: SCNNode] = [:]
         /// In-flight orbit path build tasks.
@@ -517,13 +591,17 @@ struct GlobeSceneView: UIViewRepresentable {
             publishStats(trackedCount: tracked.count, shouldUseModel: shouldUseModel)
         }
 
-        /// Updates directional and ambient lighting based on user settings.
-        func updateLighting(in scene: SCNScene, isDirectionalLightEnabled: Bool) {
-            guard lastDirectionalLightEnabled != isDirectionalLightEnabled else { return }
-            lastDirectionalLightEnabled = isDirectionalLightEnabled
-
+        /// Updates directional and ambient lighting based on user settings and UTC time.
+        func updateLighting(
+            in scene: SCNScene,
+            isDirectionalLightEnabled: Bool,
+            at date: Date
+        ) {
             let sunNode = scene.rootNode.childNode(withName: "sunLight", recursively: false)
             let ambientNode = scene.rootNode.childNode(withName: "ambientLight", recursively: false)
+            if let sunNode {
+                updateSunNodeDirection(sunNode, at: date)
+            }
 
             if isDirectionalLightEnabled {
                 sunNode?.light?.intensity = GlobeSceneView.sunLightIntensity
@@ -534,6 +612,15 @@ struct GlobeSceneView: UIViewRepresentable {
                 sunNode?.light?.castsShadow = false
                 ambientNode?.light?.intensity = GlobeSceneView.ambientLightIntensityWhenDirectionalOff
             }
+        }
+
+        /// Orients the directional light using the real-time subsolar point.
+        private func updateSunNodeDirection(_ sunNode: SCNNode, at date: Date) {
+            let directionToSun = SolarLightingModel.sceneSunDirection(at: date)
+            let sunPosition = directionToSun * GlobeSceneView.sunLightNodeDistance
+            sunNode.position = SCNVector3(sunPosition.x, sunPosition.y, sunPosition.z)
+            // Looking at Earth's center aligns the light ray direction with incoming sunlight.
+            sunNode.look(at: SCNVector3Zero)
         }
 
         /// Centers the camera on a satellite when a focus request is issued.
