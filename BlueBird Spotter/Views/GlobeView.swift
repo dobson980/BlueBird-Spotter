@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// Shows a 3D globe with tracked satellites and selection details.
 struct GlobeView: View {
@@ -19,6 +20,10 @@ struct GlobeView: View {
     @AppStorage("globe.light.directional.enabled") private var directionalLightEnabled = true
     /// Stores the persisted orbit path mode selection.
     @AppStorage("globe.orbit.mode") private var orbitPathModeRaw = OrbitPathMode.selectedOnly.rawValue
+    /// Stores the persisted orbit path thickness for the ribbon.
+    @AppStorage("globe.orbit.thickness") private var orbitPathThickness: Double = 0.003
+    /// Stores the persisted orbit path color selection.
+    @AppStorage("globe.orbit.color") private var orbitPathColorId = OrbitPathColorOption.defaultId
     /// Controls whether the globe settings panel is visible.
     @State private var isSettingsExpanded = false
     #if DEBUG
@@ -58,7 +63,7 @@ struct GlobeView: View {
                 selectedSatelliteId: selectedSatelliteId,
                 isDirectionalLightEnabled: directionalLightEnabled,
                 orbitPathMode: orbitPathMode,
-                orbitPathConfig: OrbitPathConfig.default,
+                orbitPathConfig: orbitPathConfig,
                 focusRequest: navigationState.focusRequest,
                 onStats: statsHandler,
                 onSelect: { selectedSatelliteId = $0 }
@@ -257,7 +262,24 @@ struct GlobeView: View {
         )
     }
 
-    /// Builds the top-right settings button for globe options.
+    /// Returns the selected orbit color option, defaulting to ASTS orange.
+    private var orbitPathColorOption: OrbitPathColorOption {
+        OrbitPathColorOption.options.first { $0.id == orbitPathColorId } ?? OrbitPathColorOption.defaultOption
+    }
+
+    /// Builds the orbit path config from persisted settings.
+    private var orbitPathConfig: OrbitPathConfig {
+        let selected = orbitPathColorOption
+        return OrbitPathConfig(
+            sampleCount: OrbitPathConfig.default.sampleCount,
+            altitudeOffsetKm: OrbitPathConfig.default.altitudeOffsetKm,
+            lineColor: selected.uiColor,
+            lineOpacity: OrbitPathConfig.default.lineOpacity,
+            lineWidth: CGFloat(orbitPathThickness)
+        )
+    }
+
+    /// Builds the top-right settings button with a glass style.
     private var settingsButton: some View {
         Button {
             withAnimation(.easeInOut(duration: 0.2)) {
@@ -267,9 +289,8 @@ struct GlobeView: View {
             Image(systemName: "gearshape.fill")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.primary)
-                .padding(10)
-                .background(.thinMaterial, in: Circle())
         }
+        .buttonStyle(.glass)
         .accessibilityLabel("Globe Settings")
     }
 
@@ -293,6 +314,54 @@ struct GlobeView: View {
                 }
                 .pickerStyle(.segmented)
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Path Thickness")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                // The slider lets readers see how a continuous control maps to orbit thickness.
+                Text("\(orbitPathThickness, specifier: "%.3f")")
+                    .monospacedDigit()
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Slider(value: $orbitPathThickness, in: 0.001...0.02, step: 0.001)
+                    .tint(orbitPathColorOption.color)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Path Color")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                // Swatch buttons keep the choice visual and quick to scan.
+                HStack(spacing: 8) {
+                    ForEach(OrbitPathColorOption.options) { option in
+                        Button {
+                            orbitPathColorId = option.id
+                        } label: {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(option.color)
+                                .frame(width: 22, height: 22)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke(option.id == orbitPathColorId ? Color.white : Color.white.opacity(0.2), lineWidth: 1)
+                                )
+                                .overlay(
+                                    Group {
+                                        if option.id == orbitPathColorId {
+                                            Image(systemName: "checkmark")
+                                                .font(.caption2.weight(.bold))
+                                                .foregroundStyle(.white)
+                                        }
+                                    }
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
         .padding(12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
@@ -302,6 +371,49 @@ struct GlobeView: View {
         )
         .shadow(color: .black.opacity(0.18), radius: 12, x: 0, y: 6)
         .frame(maxWidth: 260)
+    }
+
+    /// Defines the orbit path color palette shown in the menu.
+    private struct OrbitPathColorOption: Identifiable, Hashable {
+        let id: String
+        let name: String
+        let uiColor: UIColor
+
+        var color: Color { Color(uiColor: uiColor) }
+
+        // ASTS orange is the default to match the brand accent.
+        private static let astsOrange = OrbitPathColorOption(
+            id: "astsOrange",
+            name: "ASTS Orange",
+            uiColor: UIColor(red: 1.0, green: 0.47, blue: 0.0, alpha: 1.0)
+        )
+
+        static let options: [OrbitPathColorOption] = [
+            astsOrange,
+            OrbitPathColorOption(
+                id: "solarYellow",
+                name: "Solar Yellow",
+                uiColor: UIColor(red: 1.0, green: 0.84, blue: 0.2, alpha: 1.0)
+            ),
+            OrbitPathColorOption(
+                id: "magenta",
+                name: "Magenta",
+                uiColor: UIColor(red: 0.92, green: 0.2, blue: 0.92, alpha: 1.0)
+            ),
+            OrbitPathColorOption(
+                id: "electricBlue",
+                name: "Electric Blue",
+                uiColor: UIColor(red: 0.25, green: 0.6, blue: 1.0, alpha: 1.0)
+            ),
+            OrbitPathColorOption(
+                id: "lime",
+                name: "Lime",
+                uiColor: UIColor(red: 0.55, green: 1.0, blue: 0.3, alpha: 1.0)
+            )
+        ]
+
+        static let defaultOption = astsOrange
+        static let defaultId = astsOrange.id
     }
 
     /// Provides the debug stats callback when the build supports it.

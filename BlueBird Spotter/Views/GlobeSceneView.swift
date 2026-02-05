@@ -1259,12 +1259,7 @@ struct GlobeSceneView: UIViewRepresentable {
 
         /// Creates a SceneKit node for an orbital path line strip.
         private func makeOrbitPathNode(vertices: [SIMD3<Float>], config: OrbitPathConfig) -> SCNNode {
-            let scnVertices = vertices.map { SCNVector3($0.x, $0.y, $0.z) }
-            let source = SCNGeometrySource(vertices: scnVertices)
-            let indices = buildLineIndices(count: scnVertices.count)
-            let element = SCNGeometryElement(indices: indices, primitiveType: .line)
-
-            let geometry = SCNGeometry(sources: [source], elements: [element])
+            let geometry = buildOrbitPathGeometry(vertices: vertices, config: config)
             let material = SCNMaterial()
             material.diffuse.contents = config.lineColor
             material.emission.contents = config.lineColor
@@ -1278,6 +1273,73 @@ struct GlobeSceneView: UIViewRepresentable {
             // Orbit paths are visual-only; keep them out of satellite hit testing.
             node.categoryBitMask = orbitPathCategoryMask
             return node
+        }
+
+        /// Builds either a thin line or a ribbon geometry based on the configured thickness.
+        private func buildOrbitPathGeometry(vertices: [SIMD3<Float>], config: OrbitPathConfig) -> SCNGeometry {
+            let lineWidth = Float(config.lineWidth)
+            if lineWidth > 0.0005 {
+                return buildOrbitRibbonGeometry(vertices: vertices, width: lineWidth)
+            }
+            return buildOrbitLineGeometry(vertices: vertices)
+        }
+
+        /// Builds a thin line geometry for the orbit path.
+        private func buildOrbitLineGeometry(vertices: [SIMD3<Float>]) -> SCNGeometry {
+            let scnVertices = vertices.map { SCNVector3($0.x, $0.y, $0.z) }
+            let source = SCNGeometrySource(vertices: scnVertices)
+            let indices = buildLineIndices(count: scnVertices.count)
+            let element = SCNGeometryElement(indices: indices, primitiveType: .line)
+            return SCNGeometry(sources: [source], elements: [element])
+        }
+
+        /// Builds a ribbon-style orbit path so thickness is adjustable.
+        private func buildOrbitRibbonGeometry(vertices: [SIMD3<Float>], width: Float) -> SCNGeometry {
+            guard vertices.count > 1 else {
+                return buildOrbitLineGeometry(vertices: vertices)
+            }
+
+            let halfWidth = width * 0.5
+            var ribbonVertices: [SCNVector3] = []
+            ribbonVertices.reserveCapacity(vertices.count * 2)
+
+            for index in vertices.indices {
+                let current = vertices[index]
+                let previous = index > 0 ? vertices[index - 1] : current
+                let next = index + 1 < vertices.count ? vertices[index + 1] : current
+
+                let tangentRaw = next - previous
+                let tangentLength = simd_length(tangentRaw)
+                let tangent = tangentLength > 0.0001
+                    ? (tangentRaw / tangentLength)
+                    : simd_float3(1, 0, 0)
+
+                let radialRaw = current
+                let radialLength = simd_length(radialRaw)
+                let radial = radialLength > 0.0001
+                    ? (radialRaw / radialLength)
+                    : simd_float3(0, 1, 0)
+
+                var side = simd_cross(tangent, radial)
+                if simd_length(side) < 0.0001 {
+                    side = simd_cross(tangent, simd_float3(0, 1, 0))
+                }
+                if simd_length(side) < 0.0001 {
+                    side = simd_cross(radial, simd_float3(1, 0, 0))
+                }
+                side = simd_normalize(side)
+
+                let offset = side * halfWidth
+                let left = current + offset
+                let right = current - offset
+                ribbonVertices.append(SCNVector3(left.x, left.y, left.z))
+                ribbonVertices.append(SCNVector3(right.x, right.y, right.z))
+            }
+
+            let indices = (0..<UInt32(ribbonVertices.count)).map { $0 }
+            let source = SCNGeometrySource(vertices: ribbonVertices)
+            let element = SCNGeometryElement(indices: indices, primitiveType: .triangleStrip)
+            return SCNGeometry(sources: [source], elements: [element])
         }
 
         /// Builds the index list for consecutive line segments.
