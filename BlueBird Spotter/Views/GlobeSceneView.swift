@@ -126,6 +126,7 @@ struct GlobeSceneView: UIViewRepresentable {
     func updateUIView(_ uiView: SCNView, context: Context) {
         guard let scene = uiView.scene else { return }
         context.coordinator.renderConfig = config
+        context.coordinator.selectionColor = orbitPathConfig.lineColor
         context.coordinator.updateLighting(in: scene, isDirectionalLightEnabled: isDirectionalLightEnabled)
         context.coordinator.updateSatellites(
             trackedSatellites,
@@ -358,6 +359,10 @@ struct GlobeSceneView: UIViewRepresentable {
         private var lastFocusToken: UUID?
         /// Stores a focus request until the satellite node exists.
         private var pendingFocusRequest: SatelliteFocusRequest?
+        /// Color used for selection accents.
+        var selectionColor: UIColor = .systemOrange
+        /// Node that highlights the selected satellite.
+        private var selectionIndicatorNode: SCNNode?
         /// Action key used to replace in-flight camera focus animations.
         private let cameraFocusActionKey = "cameraFocusOrbit"
         /// Home camera position for double-tap reset (0,0 over Africa).
@@ -491,6 +496,17 @@ struct GlobeSceneView: UIViewRepresentable {
                         applyModelScale(scale, to: update.node)
                     }
                 }
+            }
+
+            // Update the selection indicator once after all satellites are processed.
+            if let selectedId,
+               let selectedUpdate = updates.first(where: { $0.id == selectedId }) {
+                updateSelectionIndicator(
+                    attachedTo: selectedUpdate.node,
+                    in: scene
+                )
+            } else {
+                clearSelectionIndicator()
             }
             SCNTransaction.commit()
 
@@ -1585,6 +1601,81 @@ struct GlobeSceneView: UIViewRepresentable {
             let pitch = simd_quatf(angle: config.basePitch, axis: simd_float3(1, 0, 0))
             let roll = simd_quatf(angle: config.baseRoll, axis: simd_float3(0, 0, 1))
             return yaw * pitch * roll
+        }
+
+        /// Adds or updates the selection halo attached to the selected satellite node.
+        ///
+        /// The indicator is parented to the satellite so it inherits the satellite's
+        /// orientation, keeping the ring aligned with the model.
+        private func updateSelectionIndicator(
+            attachedTo satelliteNode: SCNNode,
+            in scene: SCNScene
+        ) {
+            let indicator = selectionIndicatorNode ?? makeSelectionIndicatorNode()
+
+            // If the indicator is already attached to this node, just update the color.
+            if indicator.parent == satelliteNode {
+                updateSelectionMaterial(for: indicator, color: selectionColor)
+                return
+            }
+
+            // Move the indicator to the new satellite node.
+            indicator.removeFromParentNode()
+            satelliteNode.addChildNode(indicator)
+
+            // Position at local origin so it centers on the satellite.
+            indicator.position = SCNVector3Zero
+
+            updateSelectionMaterial(for: indicator, color: selectionColor)
+            selectionIndicatorNode = indicator
+        }
+
+        /// Removes the selection halo when no satellite is selected.
+        private func clearSelectionIndicator() {
+            selectionIndicatorNode?.removeFromParentNode()
+            selectionIndicatorNode = nil
+        }
+
+        /// Builds the selection indicator node once and reuses it for the current selection.
+        ///
+        /// The indicator is a flat glowing disk that sits behind the satellite
+        /// as a simple visual marker for selection.
+        private func makeSelectionIndicatorNode() -> SCNNode {
+            // Use a flat plane for simplicity - no 3D depth needed.
+            let disk = SCNPlane(width: 26, height: 26)
+            disk.cornerRadius = 13  // Make it circular.
+            let material = SCNMaterial()
+            material.diffuse.contents = selectionColor
+            material.emission.contents = selectionColor
+            material.emission.intensity = 0.6
+            material.lightingModel = .constant
+            material.isDoubleSided = true
+            // Use alpha blending instead of additive to prevent background bleed-through.
+            material.blendMode = .alpha
+            disk.materials = [material]
+
+            let haloNode = SCNNode(geometry: disk)
+            // No rotation - the plane faces +Z by default, which aligns with the
+            // satellite's nadir-pointing orientation (Earth is in the -Z direction
+            // of the satellite's local space when nadir-pointing is enabled).
+            // Position behind the satellite toward Earth.
+            haloNode.position.z = 3.0
+            // Slightly transparent for a softer look.
+            haloNode.opacity = 0.7
+            // Render behind the satellite and orbit paths.
+            haloNode.renderingOrder = -10
+            // Use the satellite category so the camera renders this node.
+            haloNode.categoryBitMask = satelliteCategoryMask
+            return haloNode
+        }
+
+        /// Updates the halo material when the user picks a new path color.
+        private func updateSelectionMaterial(for node: SCNNode, color: UIColor) {
+            guard let geometry = node.geometry else { return }
+            for material in geometry.materials {
+                material.diffuse.contents = color
+                material.emission.contents = color
+            }
         }
 
         /// Walks up the node hierarchy to find the satellite id string.
