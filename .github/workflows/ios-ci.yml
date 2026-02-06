@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-and-unit-test:
-    runs-on: macos-latest
+    runs-on: macos-15
 
     steps:
       - name: Checkout
@@ -22,6 +22,45 @@ jobs:
 
       - name: Show Xcode Version
         run: xcodebuild -version
+
+      - name: Ensure iOS Simulator Runtime Is Available
+        run: |
+          set -euo pipefail
+
+          # Some runner images occasionally start without usable iOS simulators.
+          # If no iPhone simulator is available, request the iOS platform runtime.
+          if ! xcrun simctl list devices available | grep -q "iPhone"; then
+            echo "No available iPhone simulators detected. Downloading iOS platform runtime..."
+            xcodebuild -downloadPlatform iOS
+          fi
+
+          # If runtime exists but no iPhone simulator device was created, create one.
+          if ! xcrun simctl list devices available | grep -q "iPhone"; then
+            runtime_id="$(
+              xcrun simctl list runtimes available | \
+              awk -F ' - ' '/iOS/ && /SimRuntime\\.iOS/ { print $2; exit }'
+            )"
+            device_type_id="$(
+              xcrun simctl list devicetypes | \
+              awk -F '[()]' '
+                /iPhone 16/ { print $2; foundPreferred = 1; exit }
+                /iPhone/ && !fallback { fallback = $2 }
+                END {
+                  if (!foundPreferred && fallback != "") {
+                    print fallback
+                  }
+                }
+              '
+            )"
+
+            if [ -n "${runtime_id}" ] && [ -n "${device_type_id}" ]; then
+              echo "Creating fallback simulator with runtime ${runtime_id} and device type ${device_type_id}..."
+              xcrun simctl create "BlueBird Spotter CI iPhone" "${device_type_id}" "${runtime_id}" || true
+            fi
+          fi
+
+          echo "Available simulator devices:"
+          xcrun simctl list devices available
 
       - name: Select Simulator Destination
         run: |
