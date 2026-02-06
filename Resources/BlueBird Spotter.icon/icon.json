@@ -1,0 +1,125 @@
+{
+  "fill" : {
+    "automatic-gradient" : "extended-gray:0.25000,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "4.png",
+          "name" : "Star 6",
+          "position" : {
+            "scale" : 0.14,
+            "translation-in-points" : [
+              317,
+              -394
+            ]
+          }
+        },
+        {
+          "image-name" : "4.png",
+          "name" : "Star 5",
+          "position" : {
+            "scale" : 0.16,
+            "translation-in-points" : [
+              406.3599999999999,
+              32.639999999999986
+            ]
+          }
+        },
+        {
+          "image-name" : "4.png",
+          "name" : "Star 4",
+          "position" : {
+            "scale" : 0.25,
+            "translation-in-points" : [
+              -74.04500000000002,
+              -163.14999999999998
+            ]
+          }
+        },
+        {
+          "image-name" : "2 3.png",
+          "name" : "Satellite",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              213,
+              -180
+            ]
+          }
+        },
+        {
+          "image-name" : "3 2.png",
+          "name" : "Trail",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -12,
+              -374
+            ]
+          }
+        },
+        {
+          "blend-mode" : "lighten",
+          "image-name" : "1 3.png",
+          "name" : "Person",
+          "position" : {
+            "scale" : 0.63,
+            "translation-in-points" : [
+              8.139999999999986,
+              178
+            ]
+          }
+        },
+        {
+          "image-name" : "BlueBird Spotter Icon-3.png",
+          "name" : "Star 1",
+          "position" : {
+            "scale" : 0.17,
+            "translation-in-points" : [
+              -274.16999999999996,
+              -296.65
+            ]
+          }
+        },
+        {
+          "image-name" : "BlueBird Spotter Icon-3.png",
+          "name" : "Star 2",
+          "position" : {
+            "scale" : 0.11,
+            "translation-in-points" : [
+              -141.88999999999987,
+              -371.45000000000005
+            ]
+          }
+        },
+        {
+          "image-name" : "BlueBird Spotter Icon-3.png",
+          "name" : "Star 3",
+          "position" : {
+            "scale" : 0.11,
+            "translation-in-points" : [
+              416,
+              -296.65
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
