@@ -106,10 +106,12 @@ jobs:
           set -euo pipefail
 
           xcodebuild \
-            -scheme "BlueBird Spotter" \
+            -scheme "BlueBird Spotter UnitTests" \
             -destination "id=$SIMULATOR_ID" \
             -only-testing:"BlueBird SpotterTests" \
             -skip-testing:"BlueBird SpotterUITests" \
             -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            ENABLE_PREVIEWS=NO \
             test
