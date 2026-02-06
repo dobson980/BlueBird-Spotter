@@ -31,6 +31,8 @@ final class CelesTrakViewModel {
     /// The app uses this in production so cooldown survives app restarts.
     /// Tests can inject `.disabled` to avoid cross-test shared state.
     struct ManualRefreshCooldownPersistence {
+        /// This type stores closure-based behavior so tests and previews can
+        /// swap storage strategies without introducing network or disk coupling.
         /// Reads the most recent manual refresh attempt timestamp.
         let loadLastAttempt: () -> Date?
         /// Persists the latest manual refresh attempt timestamp.
@@ -39,11 +41,16 @@ final class CelesTrakViewModel {
         let clearLastAttempt: () -> Void
 
         /// No-op storage used by tests and previews.
-        static let disabled = ManualRefreshCooldownPersistence(
-            loadLastAttempt: { nil },
-            saveLastAttempt: { _ in },
-            clearLastAttempt: {}
-        )
+        ///
+        /// This is computed (not a stored global constant) to keep strict
+        /// concurrency checks simple across different Xcode toolchains.
+        static var disabled: ManualRefreshCooldownPersistence {
+            ManualRefreshCooldownPersistence(
+                loadLastAttempt: { nil },
+                saveLastAttempt: { _ in },
+                clearLastAttempt: {}
+            )
+        }
 
         /// UserDefaults-backed storage used by the production app.
         static func userDefaults(

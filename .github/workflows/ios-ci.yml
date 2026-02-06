@@ -9,16 +9,16 @@ on:
 
 jobs:
   build-and-unit-test:
-    runs-on: macos-15
+    runs-on: macos-26
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode 16.4
+      - name: Select Latest Installed Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "16.4"
+          xcode-version: latest
 
       - name: Show Xcode Version
         run: xcodebuild -version
@@ -62,33 +62,25 @@ jobs:
           echo "Available simulator devices:"
           xcrun simctl list devices available
 
-      - name: Select Simulator Destination
+      - name: Select iOS 26 Simulator
         run: |
           set -euo pipefail
 
-          destination="$(
-            xcodebuild -scheme "BlueBird Spotter" -showdestinations 2>/dev/null | \
+          simulator_id="$(
+            xcrun simctl list devices available | \
             awk '
-              /platform:iOS Simulator/ && /name:iPhone/ {
-                os = ""; name = "";
-                if (match($0, /OS:[^,]*/)) {
-                  os = substr($0, RSTART + 3, RLENGTH - 3);
-                  gsub(/^ +| +$/, "", os);
+              /^-- iOS 26/ { in_iOS26 = 1; next }
+              /^-- / { in_iOS26 = 0 }
+              in_iOS26 && /iPhone 17 \(/ {
+                if (match($0, /\(([A-F0-9-]+)\)/)) {
+                  print substr($0, RSTART + 1, RLENGTH - 2);
+                  foundPreferred = 1;
+                  exit;
                 }
-                if (match($0, /name:[^}]*/)) {
-                  name = substr($0, RSTART + 5, RLENGTH - 5);
-                  gsub(/^ +| +$/, "", name);
-                }
-                if (os != "" && name != "") {
-                  destination = sprintf("platform=iOS Simulator,OS=%s,name=%s", os, name);
-                  if ($0 ~ /name:iPhone 17/) {
-                    print destination;
-                    foundPreferred = 1;
-                    exit;
-                  }
-                  if (fallback == "") {
-                    fallback = destination;
-                  }
+              }
+              in_iOS26 && /iPhone/ && !fallback {
+                if (match($0, /\(([A-F0-9-]+)\)/)) {
+                  fallback = substr($0, RSTART + 1, RLENGTH - 2);
                 }
               }
               END {
@@ -99,20 +91,20 @@ jobs:
             '
           )"
 
-          if [ -z "${destination}" ]; then
-            echo "No iPhone simulator destination was found for this scheme."
-            xcodebuild -scheme "BlueBird Spotter" -showdestinations
+          if [ -z "${simulator_id}" ]; then
+            echo "No iOS 26 iPhone simulator was found."
+            xcrun simctl list devices available
             exit 1
           fi
 
-          echo "SIMULATOR_DESTINATION=${destination}" >> "$GITHUB_ENV"
-          echo "Using simulator destination: ${destination}"
+          echo "SIMULATOR_ID=${simulator_id}" >> "$GITHUB_ENV"
+          echo "Using simulator id: ${simulator_id}"
 
       - name: Build App (Simulator)
         run: |
           xcodebuild \
             -scheme "BlueBird Spotter" \
-            -destination "$SIMULATOR_DESTINATION" \
+            -destination "id=$SIMULATOR_ID" \
             -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             build-for-testing
@@ -121,7 +113,7 @@ jobs:
         run: |
           xcodebuild \
             -scheme "BlueBird Spotter" \
-            -destination "$SIMULATOR_DESTINATION" \
+            -destination "id=$SIMULATOR_ID" \
             -only-testing:"BlueBird SpotterTests" \
             -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
