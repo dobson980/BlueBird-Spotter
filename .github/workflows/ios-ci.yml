@@ -10,8 +10,6 @@ on:
 jobs:
   build-and-unit-test:
     runs-on: macos-latest
-    env:
-      DERIVED_DATA_PATH: ${{ runner.temp }}/BlueBirdSpotter-DerivedData
 
     steps:
       - name: Checkout
@@ -76,7 +74,7 @@ jobs:
           xcodebuild \
             -scheme "BlueBird Spotter" \
             -destination "$SIMULATOR_DESTINATION" \
-            -derivedDataPath "$DERIVED_DATA_PATH" \
+            -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             build-for-testing
 
@@ -86,6 +84,6 @@ jobs:
             -scheme "BlueBird Spotter" \
             -destination "$SIMULATOR_DESTINATION" \
             -only-testing:"BlueBird SpotterTests" \
-            -derivedDataPath "$DERIVED_DATA_PATH" \
+            -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             test-without-building
