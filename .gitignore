@@ -13,3 +13,10 @@ Package.resolved
 # Carthage/CocoaPods (if any)
 Carthage/Build/
 Pods/
+
+# Local Xcode build/test artifacts created in-repo
+.derivedData/
+.derivedData-*/
+.test-results/
+.test-results-*/
+*.xcresult

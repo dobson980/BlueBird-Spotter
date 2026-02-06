@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		78FE83962EF76856009FB172 /* SatelliteKit in Frameworks */ = {isa = PBXBuildFile; productRef = 78FE83952EF76856009FB172 /* SatelliteKit */; };
+		78FE83982EF768F3009FB172 /* SatelliteKit in Frameworks */ = {isa = PBXBuildFile; productRef = 78FE83972EF768F3009FB172 /* SatelliteKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		78B4E1D52EF6245C00DF3FC9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +57,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				78FE83962EF76856009FB172 /* SatelliteKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -59,6 +65,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				78FE83982EF768F3009FB172 /* SatelliteKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +119,7 @@
 			);
 			name = "BlueBird Spotter";
 			packageProductDependencies = (
+				78FE83952EF76856009FB172 /* SatelliteKit */,
 			);
 			productName = "BlueBird Spotter";
 			productReference = 78B4E1C72EF6245B00DF3FC9 /* BlueBird Spotter.app */;
@@ -135,6 +143,7 @@
 			);
 			name = "BlueBird SpotterTests";
 			packageProductDependencies = (
+				78FE83972EF768F3009FB172 /* SatelliteKit */,
 			);
 			productName = "BlueBird SpotterTests";
 			productReference = 78B4E1D42EF6245C00DF3FC9 /* BlueBird SpotterTests.xctest */;
@@ -195,6 +204,9 @@
 			);
 			mainGroup = 78B4E1BE2EF6245B00DF3FC9;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				78FE83942EF76856009FB172 /* XCRemoteSwiftPackageReference "SatelliteKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 78B4E1C82EF6245B00DF3FC9 /* Products */;
 			projectDirPath = "";
@@ -400,6 +412,7 @@
 				DEVELOPMENT_TEAM = JLFK698MRZ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = "DobsonLabs.BlueBird-Spotter.refreshTLE";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -410,6 +423,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -module-alias SatKit=SatelliteKit";
 				PRODUCT_BUNDLE_IDENTIFIER = "DobsonLabs.BlueBird-Spotter";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -432,6 +446,7 @@
 				DEVELOPMENT_TEAM = JLFK698MRZ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = "DobsonLabs.BlueBird-Spotter.refreshTLE";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -442,6 +457,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -module-alias SatKit=SatelliteKit";
 				PRODUCT_BUNDLE_IDENTIFIER = "DobsonLabs.BlueBird-Spotter";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -464,13 +480,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -module-alias SatKit=SatelliteKit";
 				PRODUCT_BUNDLE_IDENTIFIER = "DobsonLabs.BlueBird-SpotterTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BlueBird Spotter.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BlueBird Spotter";
 			};
@@ -486,13 +503,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -module-alias SatKit=SatelliteKit";
 				PRODUCT_BUNDLE_IDENTIFIER = "DobsonLabs.BlueBird-SpotterTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BlueBird Spotter.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BlueBird Spotter";
 			};
@@ -512,7 +530,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = "BlueBird Spotter";
 			};
@@ -532,7 +550,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = "BlueBird Spotter";
 			};
@@ -578,6 +596,29 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		78FE83942EF76856009FB172 /* XCRemoteSwiftPackageReference "SatelliteKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gavineadie/SatelliteKit.git";
+			requirement = {
+				kind = exactVersion;
+				version = 2.1.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		78FE83952EF76856009FB172 /* SatelliteKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 78FE83942EF76856009FB172 /* XCRemoteSwiftPackageReference "SatelliteKit" */;
+			productName = SatelliteKit;
+		};
+		78FE83972EF768F3009FB172 /* SatelliteKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SatelliteKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 78B4E1BF2EF6245B00DF3FC9 /* Project object */;
 }

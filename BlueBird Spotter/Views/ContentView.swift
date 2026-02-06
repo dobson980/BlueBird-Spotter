@@ -7,48 +7,50 @@
 
 import SwiftUI
 
+/// Root container that switches between TLE listing and live tracking.
+///
+/// Tabs make it easy to compare raw TLE data with derived positions.
 struct ContentView: View {
-    @State private var viewModel = CelesTrakViewModel()
+    /// Shared navigation state lets any tab route focus to the globe.
+    @State private var navigationState = AppNavigationState()
 
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-
-            Group {
-                switch viewModel.state {
-                case .idle:
-                    Text("No TLEs loaded.")
-                case .loading:
-                    ProgressView("Loading TLEs...")
-                case .loaded(let tles):
-                    List(tles, id: \.line1) { tle in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(tle.name ?? "Unnamed satellite")
-                                .font(.headline)
-                            Text(tle.line1)
-                                .font(.caption)
-                                .monospaced()
-                            Text(tle.line2)
-                                .font(.caption)
-                                .monospaced()
-                        }
-                    }
-                case .error(let message):
-                    Text(message)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
+        TabView(selection: $navigationState.selectedTab) {
+            // The TLE tab keeps the original list-based UI intact.
+            TLEListView()
+                .tabItem {
+                    Label("TLEs", systemImage: "list.bullet")
                 }
-            }
+                .tag(AppTab.tles)
+
+            // The tracking tab shows 1Hz orbital updates.
+            TrackingView()
+                .tabItem {
+                    Label("Tracking", systemImage: "location.north.circle")
+                }
+                .tag(AppTab.tracking)
+
+            // The globe tab visualizes satellite positions around Earth.
+            GlobeView()
+                .tabItem {
+                    Label("Globe", systemImage: "globe.americas.fill")
+                }
+                .tag(AppTab.globe)
+
+            // The inside tab explains ASTS context and app behavior in simple language.
+            InsideASTSView()
+                .tabItem {
+                    Label("Info", systemImage: "info.circle.fill")
+                }
+                .tag(AppTab.insideASTS)
         }
-        .task {
-            await viewModel.fetchTLEs(nameQuery: "SPACEMOBILE")
-        }
-        .padding()
+        // Let tab content flow under the tab bar so it feels like a floating glass overlay.
+        .ignoresSafeArea(.container, edges: .bottom)
+        .environment(navigationState)
     }
 }
 
+/// Preview for quickly checking load-state layout in Xcode.
 #Preview {
     ContentView()
 }
