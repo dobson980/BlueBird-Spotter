@@ -10,10 +10,8 @@ import UIKit
 
 /// Shows a 3D globe with tracked satellites and selection details.
 struct GlobeView: View {
-    /// Local tracking view model keeps the globe fed with positions.
-    @State private var viewModel: TrackingViewModel
-    /// Currently selected satellite for the detail overlay.
-    @State private var selectedSatelliteId: Int?
+    /// Globe-specific view model manages selection, panel state, and tracking orchestration.
+    @State private var viewModel: GlobeViewModel
     /// Shared navigation state for cross-tab focus.
     @Environment(AppNavigationState.self) private var navigationState
     /// Stores the persisted directional light toggle.
@@ -24,14 +22,8 @@ struct GlobeView: View {
     @AppStorage("globe.orbit.thickness") private var orbitPathThickness: Double = 0.004
     /// Stores the persisted orbit path color selection.
     @AppStorage("globe.orbit.color") private var orbitPathColorId = OrbitPathColorOption.defaultId
-    /// Controls whether the globe settings panel is visible.
-    @State private var isSettingsExpanded = false
     /// A slightly longer animation keeps the glass settings panel from feeling "snappy" or jarring.
     private let settingsPanelAnimation: Animation = .smooth(duration: 0.35)
-    #if DEBUG
-    /// Latest render diagnostics for debugging missing content.
-    @State private var renderStats: GlobeRenderStats?
-    #endif
 
     #if DEBUG
     /// Adjusts the satellite model scale for SceneKit.
@@ -52,7 +44,7 @@ struct GlobeView: View {
 
     /// Allows previews to inject a prepared view model.
     init(viewModel: TrackingViewModel = TrackingViewModel()) {
-        _viewModel = State(initialValue: viewModel)
+        _viewModel = State(initialValue: GlobeViewModel(trackingViewModel: viewModel))
     }
 
     var body: some View {
@@ -62,18 +54,18 @@ struct GlobeView: View {
             GlobeSceneView(
                 trackedSatellites: viewModel.trackedSatellites,
                 config: satelliteRenderConfig,
-                selectedSatelliteId: selectedSatelliteId,
+                selectedSatelliteId: viewModel.selectedSatelliteId,
                 isDirectionalLightEnabled: directionalLightEnabled,
                 orbitPathMode: orbitPathMode,
                 orbitPathConfig: orbitPathConfig,
                 focusRequest: navigationState.focusRequest,
                 onStats: statsHandler,
-                onSelect: { selectedSatelliteId = $0 }
+                onSelect: { viewModel.selectedSatelliteId = $0 }
             )
             // Let the globe fill under the status and tab bars for a more immersive view.
             .ignoresSafeArea(.container, edges: [.top, .bottom])
 
-            if let selected = selectedSatellite {
+            if let selected = viewModel.selectedSatellite {
                 GlobeSelectionOverlay(trackedSatellite: selected)
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -85,18 +77,18 @@ struct GlobeView: View {
                 .safeAreaPadding(.top, 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
 
-            if isSettingsExpanded {
+            if viewModel.isSettingsExpanded {
                 // A transparent scrim captures taps to dismiss the settings panel.
                 Color.black.opacity(0.001)
                     .ignoresSafeArea()
                     .onTapGesture {
                         withAnimation(settingsPanelAnimation) {
-                            isSettingsExpanded = false
+                            viewModel.isSettingsExpanded = false
                         }
                     }
             }
 
-            if isSettingsExpanded {
+            if viewModel.isSettingsExpanded {
                 settingsPanel
                     .padding()
                     // Match the settings button by staying inside the top safe area.
@@ -107,12 +99,24 @@ struct GlobeView: View {
 
             #if DEBUG
             if GlobeDebugFlags.showTuningUI {
-                renderControls
+                GlobeDebugRenderControls(
+                    satelliteScale: $satelliteScale,
+                    satelliteBaseYawDegrees: $satelliteBaseYawDegrees,
+                    satelliteBasePitchDegrees: $satelliteBasePitchDegrees,
+                    satelliteBaseRollDegrees: $satelliteBaseRollDegrees,
+                    satelliteOrbitHeadingDegrees: $satelliteOrbitHeadingDegrees,
+                    satelliteNadirPointing: $satelliteNadirPointing,
+                    satelliteYawFollowsOrbit: $satelliteYawFollowsOrbit,
+                    onReset: resetRenderControls
+                )
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
             if GlobeDebugFlags.showRenderStats {
-                renderStatsOverlay
+                GlobeDebugStatsOverlay(
+                    trackedCount: viewModel.trackedSatellites.count,
+                    renderStats: viewModel.renderStats
+                )
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
@@ -129,9 +133,7 @@ struct GlobeView: View {
         }
         .onChange(of: navigationState.focusRequest?.token) { _, _ in
             // Mirror focus requests into selection so the overlay/high detail stays in sync.
-            if let request = navigationState.focusRequest {
-                selectedSatelliteId = request.satelliteId
-            }
+            viewModel.syncSelection(with: navigationState.focusRequest)
         }
     }
 
@@ -169,65 +171,6 @@ struct GlobeView: View {
     }
 
     #if DEBUG
-    /// Builds the live tuning overlay for scale and rotation offsets.
-    private var renderControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Satellite Tuning")
-                .font(.headline)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Scale: \(satelliteScale, specifier: "%.3f")")
-                Slider(value: $satelliteScale, in: 0.001...0.05)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Yaw Offset: \(satelliteBaseYawDegrees, specifier: "%.0f")°")
-                Slider(value: $satelliteBaseYawDegrees, in: -180...180, step: 1)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Pitch Offset: \(satelliteBasePitchDegrees, specifier: "%.0f")°")
-                Slider(value: $satelliteBasePitchDegrees, in: -180...180, step: 1)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Roll Offset: \(satelliteBaseRollDegrees, specifier: "%.0f")°")
-                Slider(value: $satelliteBaseRollDegrees, in: -180...180, step: 1)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Orbit Heading: \(satelliteOrbitHeadingDegrees, specifier: "%.0f")°")
-                Slider(value: $satelliteOrbitHeadingDegrees, in: -180...180, step: 1)
-            }
-
-            Toggle("Nadir Pointing", isOn: $satelliteNadirPointing)
-            Toggle("Yaw Follows Orbit", isOn: $satelliteYawFollowsOrbit)
-
-            Button("Reset") {
-                resetRenderControls()
-            }
-        }
-        .font(.caption)
-        .padding(12)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    /// Builds a lightweight debug readout for globe rendering stats.
-    private var renderStatsOverlay: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Globe Stats")
-                .font(.headline)
-            Text("Tracked: \(viewModel.trackedSatellites.count)")
-            Text("Nodes: \(renderStats?.nodeCount ?? 0)")
-            Text("Template Loaded: \(renderStats?.templateLoaded == true ? "Yes" : "No")")
-            Text("Uses Models: \(renderStats?.usesModelTemplates == true ? "Yes" : "No")")
-            Text("Simulator: \(renderStats?.isSimulator == true ? "Yes" : "No")")
-        }
-        .font(.caption2)
-        .padding(10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
-    }
-
     /// Converts degree sliders into radians for SceneKit math.
     private func degreesToRadians(_ value: Double) -> Float {
         Float(value * .pi / 180)
@@ -244,12 +187,6 @@ struct GlobeView: View {
         satelliteYawFollowsOrbit = SatelliteRenderConfig.debugDefaults.yawFollowsOrbit
     }
     #endif
-
-    /// Looks up the selected satellite for overlay display.
-    private var selectedSatellite: TrackedSatellite? {
-        guard let selectedSatelliteId else { return nil }
-        return viewModel.trackedSatellites.first { $0.satellite.id == selectedSatelliteId }
-    }
 
     /// Converts the persisted raw value into a user-facing orbit path mode.
     private var orbitPathMode: OrbitPathMode {
@@ -286,10 +223,10 @@ struct GlobeView: View {
         Button {
             withAnimation(settingsPanelAnimation) {
                 // Clear selection when opening settings so the HUD does not compete for space.
-                if !isSettingsExpanded {
-                    selectedSatelliteId = nil
+                if !viewModel.isSettingsExpanded {
+                    viewModel.selectedSatelliteId = nil
                 }
-                isSettingsExpanded.toggle()
+                viewModel.isSettingsExpanded.toggle()
             }
         } label: {
             Image(systemName: "gearshape.fill")
@@ -379,53 +316,10 @@ struct GlobeView: View {
         .frame(maxWidth: 260)
     }
 
-    /// Defines the orbit path color palette shown in the menu.
-    private struct OrbitPathColorOption: Identifiable, Hashable {
-        let id: String
-        let name: String
-        let uiColor: UIColor
-
-        var color: Color { Color(uiColor: uiColor) }
-
-        // ASTS orange is the default to match the brand accent.
-        private static let astsOrange = OrbitPathColorOption(
-            id: "astsOrange",
-            name: "ASTS Orange",
-            uiColor: UIColor(red: 1.0, green: 0.47, blue: 0.0, alpha: 1.0)
-        )
-
-        static let options: [OrbitPathColorOption] = [
-            astsOrange,
-            OrbitPathColorOption(
-                id: "solarYellow",
-                name: "Solar Yellow",
-                uiColor: UIColor(red: 1.0, green: 0.84, blue: 0.2, alpha: 1.0)
-            ),
-            OrbitPathColorOption(
-                id: "magenta",
-                name: "Magenta",
-                uiColor: UIColor(red: 0.92, green: 0.2, blue: 0.92, alpha: 1.0)
-            ),
-            OrbitPathColorOption(
-                id: "electricBlue",
-                name: "Electric Blue",
-                uiColor: UIColor(red: 0.25, green: 0.6, blue: 1.0, alpha: 1.0)
-            ),
-            OrbitPathColorOption(
-                id: "lime",
-                name: "Lime",
-                uiColor: UIColor(red: 0.55, green: 1.0, blue: 0.3, alpha: 1.0)
-            )
-        ]
-
-        static let defaultOption = astsOrange
-        static let defaultId = astsOrange.id
-    }
-
     /// Provides the debug stats callback when the build supports it.
     private var statsHandler: ((GlobeRenderStats) -> Void)? {
         #if DEBUG
-        return { renderStats = $0 }
+        return { viewModel.renderStats = $0 }
         #else
         return nil
         #endif
@@ -441,74 +335,7 @@ struct GlobeView: View {
     }
 }
 
-/// Overlay view that summarizes the tapped satellite.
-private struct GlobeSelectionOverlay: View {
-    let trackedSatellite: TrackedSatellite
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(trackedSatellite.satellite.name)
-                .font(.headline)
-            Text("Lat: \(formatDegrees(trackedSatellite.position.latitudeDegrees))")
-            Text("Lon: \(formatDegrees(trackedSatellite.position.longitudeDegrees))")
-            Text("Alt: \(formatKilometers(trackedSatellite.position.altitudeKm)) km")
-            Text("Vel: \(formatVelocity(trackedSatellite.position.velocityKmPerSec))")
-        }
-        .font(.caption)
-        .padding(10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    /// Rounds degrees for a compact overlay readout.
-    private func formatDegrees(_ value: Double) -> String {
-        String(format: "%.2f°", value)
-    }
-
-    /// Rounds kilometers for a compact overlay readout.
-    private func formatKilometers(_ value: Double) -> String {
-        String(format: "%.1f", value)
-    }
-
-    /// Formats the satellite speed (magnitude of the velocity vector) in km/h.
-    private func formatVelocity(_ velocityKmPerSec: SIMD3<Double>?) -> String {
-        guard let velocityKmPerSec else { return "—" }
-        let speedKmPerSec = (velocityKmPerSec.x * velocityKmPerSec.x
-                             + velocityKmPerSec.y * velocityKmPerSec.y
-                             + velocityKmPerSec.z * velocityKmPerSec.z).squareRoot()
-        // Convert km/s to km/h for display (matches satellitetracker3d.com).
-        let speedKmPerHour = speedKmPerSec * 3600
-        return String(format: "%.0f km/h", speedKmPerHour)
-    }
-}
-
 /// Preview for validating the globe overlay layout.
 #Preview {
     GlobeView(viewModel: .previewModel())
-}
-
-private extension TrackingViewModel {
-    /// Provides sample data for previewing the globe without network access.
-    static func previewModel() -> TrackingViewModel {
-        let viewModel = TrackingViewModel()
-        let now = Date()
-        let sampleSatellite = Satellite(
-            id: 67890,
-            name: "BLUEBIRD-XXX",
-            tleLine1: "1 67890U 98067A   20344.12345678  .00001234  00000-0  10270-3 0  9991",
-            tleLine2: "2 67890  51.6431  21.2862 0007417  92.3844  10.1234 15.48912345123456",
-            epoch: now
-        )
-        let samplePosition = SatellitePosition(
-            timestamp: now,
-            latitudeDegrees: 12.34,
-            longitudeDegrees: 56.78,
-            altitudeKm: 550.2,
-            velocityKmPerSec: nil
-        )
-        let tracked = [TrackedSatellite(satellite: sampleSatellite, position: samplePosition)]
-        viewModel.trackedSatellites = tracked
-        viewModel.state = .loaded(tracked)
-        viewModel.lastUpdatedAt = now
-        return viewModel
-    }
 }

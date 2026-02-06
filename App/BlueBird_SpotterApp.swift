@@ -11,7 +11,7 @@ import SwiftUI
 /// Entry point for the BlueBird Spotter app.
 ///
 /// The app launches directly into `ContentView`, which loads and presents
-/// a list of TLEs so you can inspect the fetched satellite data.
+/// feature tabs using a centralized app composition root.
 @main
 struct BlueBird_SpotterApp: App {
     /// Observes lifecycle changes to schedule background refresh work.
@@ -26,7 +26,7 @@ struct BlueBird_SpotterApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(compositionRoot: .live)
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .background else { return }

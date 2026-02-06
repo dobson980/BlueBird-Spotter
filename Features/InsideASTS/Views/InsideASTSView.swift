@@ -66,7 +66,7 @@ struct InsideASTSView: View {
         VStack(alignment: .leading, spacing: 12) {
             featureImage(assetName: "inside-asts-hero", fallbackIcon: "globe.americas.fill", fallbackTitle: "Add asset: inside-asts-hero")
 
-            Text("AST SpaceMobile is building a space-based cellular network that talks directly to normal smartphones. This tab gives a high-level look at the company, the BlueBird satellites, and how this app turns TLE data into a live globe experience.")
+            Text(InsideASTSContent.heroIntro)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -76,7 +76,7 @@ struct InsideASTSView: View {
                 metricChip(title: "Subscriber Reach", value: "~3B")
             }
 
-            Text("Data snapshot references: public AST SpaceMobile materials (as of February 2026).")
+            Text(InsideASTSContent.heroSnapshot)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -100,12 +100,9 @@ struct InsideASTSView: View {
             fallbackTitle: "Add asset: inside-asts-company"
         ) {
             VStack(alignment: .leading, spacing: 10) {
-                bullet("AST SpaceMobile's mission is to eliminate cellular dead zones by extending broadband directly to standard 4G/5G phones from space.")
-                bullet("AST's FAQ states the company has agreements with over 50 mobile network operators, representing nearly 3 billion combined subscribers.")
-                bullet("AST lists eight strategic partners: AT&T, Verizon, Vodafone, Rakuten, Google, American Tower, Bell Canada, and stc group.")
-                bullet("AST highlights a large IP position for direct-to-device systems, with over 3,400 patent families and more than 3,800 patents and patent-pending claims.")
-                bullet("Commercial deployment accelerated with the first BlueBird satellites in 2024 and the first next-generation BlueBird launch in late 2025.")
-                bullet("Earlier demonstrations included first-of-kind voice, video, and 5G milestones from space to unmodified smartphones.")
+                ForEach(InsideASTSContent.companyBullets, id: \.self) { item in
+                    bullet(item)
+                }
             }
         }
     }
@@ -123,16 +120,16 @@ struct InsideASTSView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Block 1 BlueBirds")
                     .font(.subheadline.weight(.semibold))
-                bullet("AST launched its first five commercial BlueBird satellites in September 2024.")
-                bullet("Each satellite unfolded a large communications array (~693 sq. ft.) to connect with everyday phones from low Earth orbit.")
+                ForEach(InsideASTSContent.block1Bullets, id: \.self) { item in
+                    bullet(item)
+                }
 
                 Text("Block 2 / FM-1 Era")
                     .font(.subheadline.weight(.semibold))
                     .padding(.top, 4)
-                bullet("The first next-generation BlueBird (BlueBird 6, often called FM-1 in community discussions) launched in December 2025.")
-                bullet("AST states this design increases processing bandwidth by more than 10x compared to first-generation BlueBirds.")
-                bullet("AST also references significantly larger phased-array scale for next-gen architecture (>2,400 sq. ft.).")
-                bullet("The strategic goal is straightforward: higher capacity, stronger service quality, and broader direct-to-device scale through partner MNOs.")
+                ForEach(InsideASTSContent.block2Bullets, id: \.self) { item in
+                    bullet(item)
+                }
             }
         }
     }
@@ -148,30 +145,9 @@ struct InsideASTSView: View {
             fallbackTitle: "Add asset: inside-asts-appflow"
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                processStep(
-                    title: "1) TLE ingestion and refresh",
-                    description: "The app fetches AST-related TLEs from CelesTrak, caches them locally, and treats data as stale after about 6 hours. That is a practical refresh window because TLE updates are periodic and not truly real-time telemetry."
-                )
-                processStep(
-                    title: "2) Real-time tracking loop",
-                    description: "Once seeded with current TLEs, the tracking engine runs at 1 Hz (once per second). On each tick, it propagates each orbit forward to 'now' and updates latitude, longitude, altitude, and velocity."
-                )
-                processStep(
-                    title: "3) Lat/Lon/Alt and velocity mapping",
-                    description: "Orbital state starts in an inertial frame and is converted into Earth-fixed geodetic coordinates for UI display. Velocity is shown as the speed magnitude, which helps users compare orbital motion at a glance."
-                )
-                processStep(
-                    title: "4) Short-horizon prediction",
-                    description: "Between TLE refreshes, the app keeps projecting motion from the latest TLE set. This provides smooth near-term estimates for the next minutes to hours until newer element sets arrive."
-                )
-                processStep(
-                    title: "5) Orbital path rendering",
-                    description: "The globe samples points around each orbit period and draws path geometry in 3D. Similar orbits are deduplicated so large constellations stay readable and performant."
-                )
-                processStep(
-                    title: "6) Real-time sunlight",
-                    description: "Directional sunlight is computed from UTC date/time, Earth's tilt, and Earth rotation (GMST). That keeps day/night placement aligned with real-world solar position as time advances."
-                )
+                ForEach(InsideASTSContent.processSteps) { step in
+                    processStep(title: step.title, description: step.description)
+                }
             }
         }
     }
@@ -187,12 +163,11 @@ struct InsideASTSView: View {
             fallbackTitle: "Add asset: inside-asts-accuracy"
         ) {
             VStack(alignment: .leading, spacing: 10) {
-                bullet("This app aims for realistic, educational approximations of AST satellite behavior using public orbital elements and standard propagation methods.")
-                bullet("Real-world orbital prediction is inherently noisy: drag, maneuvers, attitude changes, upload latency, and model assumptions all introduce error.")
-                bullet("TLE data itself is an estimation product, so projected positions can drift until refreshed with newer element sets.")
-                bullet("Rendering choices (sampling density, smoothing, and visual scaling) are tuned for readability, not mission operations.")
+                ForEach(InsideASTSContent.accuracyBullets, id: \.self) { item in
+                    bullet(item)
+                }
 
-                Text("This is a hobby app for ASTS enthusiasts and interested investors. It is not a flight operations or safety-critical tool, and no guarantee of exact real-time precision is implied.")
+                Text(InsideASTSContent.disclaimer)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(10)
@@ -200,7 +175,7 @@ struct InsideASTSView: View {
                         secondaryCardBackground(cornerRadius: 10)
                     }
 
-                Text("Nothing in this app is financial advice.")
+                Text(InsideASTSContent.financeDisclaimer)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -218,15 +193,9 @@ struct InsideASTSView: View {
             fallbackTitle: ""
         ) {
             VStack(alignment: .leading, spacing: 8) {
-                sourceLink("AST SpaceMobile FAQ", url: "https://ast-science.com/faq/")
-                sourceLink("AST Strategic Partners", url: "https://ast-science.com/partners/")
-                sourceLink("AST 'The Next-Generation Space-Based Cellular Broadband Network'", url: "https://ast-science.com/the-next-generation-space-based-cellular-broadband-network/")
-                sourceLink("AST Company Timeline / Journey", url: "https://ast-science.com/company/our-journey/")
-                sourceLink("BlueBird 1-5 profile", url: "https://ast-science.com/bluebird-1-5/")
-                sourceLink("Next-Generation BlueBird profile", url: "https://ast-science.com/next-gen-bluebird/")
-                sourceLink("BlueBird launch news (Sept 2024)", url: "https://ast-science.com/2024/09/24/ast-spacemobile-bluebird-1-5-satellite-mission-launches-from-florida/")
-                sourceLink("BlueBird 6 launch news (Dec 2025)", url: "https://ast-science.com/2025/12/23/ast-spacemobile-successfully-launches-bluebird-6-the-first-next-generation-satellite-in-its-cellular-broadband-network/")
-                sourceLink("SEC filings (ASTS investor relations)", url: "https://ast-science.com/investor-relations/financial-information/sec-filings/")
+                ForEach(InsideASTSContent.sourceReferences) { reference in
+                    sourceLink(reference.title, url: reference.url)
+                }
             }
         }
     }

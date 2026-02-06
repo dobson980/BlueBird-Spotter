@@ -1,0 +1,36 @@
+name: iOS CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'codex/**'
+  pull_request:
+
+jobs:
+  build-and-unit-test:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode Version
+        run: xcodebuild -version
+
+      - name: Build App
+        run: |
+          xcodebuild \
+            -scheme "BlueBird Spotter" \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
+            build
+
+      - name: Run Unit Tests
+        run: |
+          xcodebuild \
+            -scheme "BlueBird Spotter" \
+            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -only-testing:"BlueBird SpotterTests" \
+            -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
+            test

@@ -332,31 +332,3 @@ struct TrackingView: View {
 #Preview {
     TrackingView(viewModel: .previewModel())
 }
-
-private extension TrackingViewModel {
-    /// Provides sample data for previewing tracking without network access.
-    static func previewModel() -> TrackingViewModel {
-        let viewModel = TrackingViewModel()
-        let now = Date()
-        let sampleSatellite = Satellite(
-            id: 12345,
-            name: "BLUEBIRD-TRACK",
-            tleLine1: "1 12345U 98067A   20344.12345678  .00001234  00000-0  10270-3 0  9991",
-            tleLine2: "2 12345  51.6431  21.2862 0007417  92.3844  10.1234 15.48912345123456",
-            epoch: now
-        )
-        let samplePosition = SatellitePosition(
-            timestamp: now,
-            latitudeDegrees: 37.77,
-            longitudeDegrees: -122.42,
-            altitudeKm: 550.2,
-            velocityKmPerSec: nil
-        )
-        let tracked = [TrackedSatellite(satellite: sampleSatellite, position: samplePosition)]
-        viewModel.trackedSatellites = tracked
-        viewModel.state = .loaded(tracked)
-        viewModel.lastUpdatedAt = now
-        viewModel.lastTLEFetchedAt = now
-        return viewModel
-    }
-}
