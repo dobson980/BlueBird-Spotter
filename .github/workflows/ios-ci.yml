@@ -9,6 +9,7 @@ on:
 
 jobs:
   build-and-unit-test:
+    timeout-minutes: 60
     runs-on: macos-26
 
     steps:
@@ -100,21 +101,15 @@ jobs:
           echo "SIMULATOR_ID=${simulator_id}" >> "$GITHUB_ENV"
           echo "Using simulator id: ${simulator_id}"
 
-      - name: Build App (Simulator)
-        run: |
-          xcodebuild \
-            -scheme "BlueBird Spotter" \
-            -destination "id=$SIMULATOR_ID" \
-            -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
-            CODE_SIGNING_ALLOWED=NO \
-            build-for-testing
-
       - name: Run Unit Tests
         run: |
+          set -euo pipefail
+
           xcodebuild \
             -scheme "BlueBird Spotter" \
             -destination "id=$SIMULATOR_ID" \
             -only-testing:"BlueBird SpotterTests" \
+            -skip-testing:"BlueBird SpotterUITests" \
             -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
-            test-without-building
+            test
