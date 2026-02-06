@@ -10,27 +10,82 @@ on:
 jobs:
   build-and-unit-test:
     runs-on: macos-latest
+    env:
+      DERIVED_DATA_PATH: ${{ runner.temp }}/BlueBirdSpotter-DerivedData
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select Latest Installed Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest
+
       - name: Show Xcode Version
         run: xcodebuild -version
 
-      - name: Build App
+      - name: Select Simulator Destination
+        run: |
+          set -euo pipefail
+
+          destination="$(
+            xcodebuild -scheme "BlueBird Spotter" -showdestinations 2>/dev/null | \
+            awk '
+              /platform:iOS Simulator/ && /name:iPhone/ {
+                os = ""; name = "";
+                if (match($0, /OS:[^,]*/)) {
+                  os = substr($0, RSTART + 3, RLENGTH - 3);
+                  gsub(/^ +| +$/, "", os);
+                }
+                if (match($0, /name:[^}]*/)) {
+                  name = substr($0, RSTART + 5, RLENGTH - 5);
+                  gsub(/^ +| +$/, "", name);
+                }
+                if (os != "" && name != "") {
+                  destination = sprintf("platform=iOS Simulator,OS=%s,name=%s", os, name);
+                  if ($0 ~ /name:iPhone 17/) {
+                    print destination;
+                    foundPreferred = 1;
+                    exit;
+                  }
+                  if (fallback == "") {
+                    fallback = destination;
+                  }
+                }
+              }
+              END {
+                if (!foundPreferred && fallback != "") {
+                  print fallback;
+                }
+              }
+            '
+          )"
+
+          if [ -z "${destination}" ]; then
+            echo "No iPhone simulator destination was found for this scheme."
+            xcodebuild -scheme "BlueBird Spotter" -showdestinations
+            exit 1
+          fi
+
+          echo "SIMULATOR_DESTINATION=${destination}" >> "$GITHUB_ENV"
+          echo "Using simulator destination: ${destination}"
+
+      - name: Build App (Simulator)
         run: |
           xcodebuild \
             -scheme "BlueBird Spotter" \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
-            build
+            -destination "$SIMULATOR_DESTINATION" \
+            -derivedDataPath "$DERIVED_DATA_PATH" \
+            CODE_SIGNING_ALLOWED=NO \
+            build-for-testing
 
       - name: Run Unit Tests
         run: |
           xcodebuild \
             -scheme "BlueBird Spotter" \
-            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -destination "$SIMULATOR_DESTINATION" \
             -only-testing:"BlueBird SpotterTests" \
-            -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
-            test
+            -derivedDataPath "$DERIVED_DATA_PATH" \
+            CODE_SIGNING_ALLOWED=NO \
+            test-without-building
