@@ -328,7 +328,21 @@ struct TrackingView: View {
     }
 }
 
-/// Preview for validating tracking layout without live data.
-#Preview {
-    TrackingView(viewModel: .previewModel())
+/// Preview for validating tracking cards with realistic telemetry values.
+#Preview("Loaded") {
+    TrackingView(viewModel: .previewLoadedModel())
+        // Inject navigation state so selection taps resolve the same as the running app.
+        .environment(AppNavigationState())
+}
+
+/// Preview for checking the loading state before tracking starts.
+#Preview("Loading") {
+    TrackingView(viewModel: .previewLoadingModel())
+        .environment(AppNavigationState())
+}
+
+/// Preview for checking long error messages and empty-state spacing.
+#Preview("Error") {
+    TrackingView(viewModel: .previewErrorModel())
+        .environment(AppNavigationState())
 }

@@ -12,7 +12,7 @@ import SwiftUI
 /// Tabs make it easy to compare raw TLE data with derived positions.
 struct ContentView: View {
     /// Shared navigation state lets any tab route focus to the globe.
-    @State private var navigationState = AppNavigationState()
+    @State private var navigationState: AppNavigationState
     /// View model for the TLE list tab.
     @State private var tleViewModel: CelesTrakViewModel
     /// View model for the tracking list tab.
@@ -23,8 +23,17 @@ struct ContentView: View {
     @State private var globeTrackingViewModel: TrackingViewModel
 
     /// Builds feature view models from a single app-level composition root.
+    ///
+    /// The optional `initialTab` argument is mainly useful for Xcode previews,
+    /// where contributors often want to open a specific tab immediately.
     @MainActor
-    init(compositionRoot: AppCompositionRoot = .live) {
+    init(
+        compositionRoot: AppCompositionRoot = .live,
+        initialTab: AppTab = .tles
+    ) {
+        let navigationState = AppNavigationState()
+        navigationState.selectedTab = initialTab
+        _navigationState = State(initialValue: navigationState)
         _tleViewModel = State(initialValue: compositionRoot.makeTLEViewModel())
         _trackingViewModel = State(initialValue: compositionRoot.makeTrackingViewModel())
         _globeTrackingViewModel = State(initialValue: compositionRoot.makeTrackingViewModel())
@@ -66,7 +75,22 @@ struct ContentView: View {
     }
 }
 
-/// Preview for quickly checking load-state layout in Xcode.
-#Preview {
-    ContentView()
+/// Preview for validating the default TLE tab composition.
+#Preview("TLE Tab") {
+    ContentView(initialTab: .tles)
+}
+
+/// Preview for validating tracking tab shell composition.
+#Preview("Tracking Tab") {
+    ContentView(initialTab: .tracking)
+}
+
+/// Preview for validating globe tab shell composition.
+#Preview("Globe Tab") {
+    ContentView(initialTab: .globe)
+}
+
+/// Preview for validating the information tab shell composition.
+#Preview("Info Tab") {
+    ContentView(initialTab: .insideASTS)
 }

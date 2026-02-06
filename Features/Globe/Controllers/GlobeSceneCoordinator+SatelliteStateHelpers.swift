@@ -177,22 +177,29 @@ extension GlobeSceneCoordinator {
     /// orientation, keeping the ring aligned with the model.
     func updateSelectionIndicator(
         attachedTo satelliteNode: SCNNode,
+        satelliteId: Int,
         in scene: SCNScene
     ) {
         let indicator = selectionIndicatorNode ?? makeSelectionIndicatorNode()
+        let usesModelTemplate = nodeUsesModel[satelliteId] ?? false
 
-        // If the indicator is already attached to this node, just update the color.
-        if indicator.parent == satelliteNode {
-            updateSelectionMaterial(for: indicator, color: selectionColor)
-            return
+        // Fallback geometry nodes are unscaled, so apply the render scale manually
+        // to keep the halo comparable with model-backed satellites.
+        if usesModelTemplate {
+            indicator.scale = SCNVector3(1, 1, 1)
+        } else {
+            let fallbackScale = max(renderConfig.scale, 0.0005)
+            indicator.scale = SCNVector3(fallbackScale, fallbackScale, fallbackScale)
         }
 
-        // Move the indicator to the new satellite node.
-        indicator.removeFromParentNode()
-        satelliteNode.addChildNode(indicator)
+        // Move the indicator when selection changes, otherwise reuse in place.
+        if indicator.parent != satelliteNode {
+            indicator.removeFromParentNode()
+            satelliteNode.addChildNode(indicator)
 
-        // Position at local origin so it centers on the satellite.
-        indicator.position = SCNVector3Zero
+            // Position at local origin so it centers on the satellite.
+            indicator.position = SCNVector3Zero
+        }
 
         updateSelectionMaterial(for: indicator, color: selectionColor)
         selectionIndicatorNode = indicator

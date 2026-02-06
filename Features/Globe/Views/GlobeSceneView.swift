@@ -348,3 +348,97 @@ struct GlobeSceneView: UIViewRepresentable {
         }
     }
 }
+
+/// Preview for validating the base globe rendering in a canvas-safe shell.
+#Preview("Globe Only") {
+    GlobeScenePreviewShell(
+        trackedSatellites: [],
+        selectedSatelliteId: nil,
+        isDirectionalLightEnabled: true
+    )
+}
+
+/// Preview for validating tracked-satellite rendering without orbit-ribbon artifacts.
+#Preview("Tracked Satellites") {
+    GlobeScenePreviewShell(
+        trackedSatellites: GlobeScenePreviewFactory.sampleTrackedSatellites,
+        selectedSatelliteId: GlobeScenePreviewFactory.sampleTrackedSatellites.first?.satellite.id,
+        isDirectionalLightEnabled: true
+    )
+}
+
+/// Shared preview shell that matches in-app dark styling and fills the preview canvas.
+private struct GlobeScenePreviewShell: View {
+    let trackedSatellites: [TrackedSatellite]
+    let selectedSatelliteId: Int?
+    let isDirectionalLightEnabled: Bool
+
+    var body: some View {
+        ZStack {
+            // A simple dark gradient gives SceneKit a realistic context in preview.
+            LinearGradient(
+                colors: [Color(red: 0.03, green: 0.06, blue: 0.11), Color.black],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            GlobeSceneView(
+                trackedSatellites: trackedSatellites,
+                config: SatelliteRenderConfig.debugDefaults,
+                selectedSatelliteId: selectedSatelliteId,
+                isDirectionalLightEnabled: isDirectionalLightEnabled,
+                // Orbit ribbons are intentionally disabled in preview to keep the
+                // canvas stable and avoid geometry artifacts that distract from
+                // camera/light/material verification.
+                orbitPathMode: .off,
+                orbitPathConfig: .default,
+                focusRequest: nil,
+                onStats: nil,
+                onSelect: { _ in }
+            )
+            .ignoresSafeArea()
+        }
+    }
+}
+
+/// Shared preview fixtures so SceneKit previews stay deterministic and readable.
+private enum GlobeScenePreviewFactory {
+    /// Stable sample satellites used by `GlobeSceneView` previews.
+    static let sampleTrackedSatellites: [TrackedSatellite] = {
+        let now = Date()
+        let first = TrackedSatellite(
+            satellite: Satellite(
+                id: 45854,
+                name: "BLUEBIRD-1",
+                tleLine1: "1 45854U 20008A   26036.22192385  .00005457  00000+0  43089-3 0  9994",
+                tleLine2: "2 45854  53.0544 292.8396 0001647  89.3122 270.8203 15.06378191327752",
+                epoch: now
+            ),
+            position: SatellitePosition(
+                timestamp: now,
+                latitudeDegrees: 31.5,
+                longitudeDegrees: -97.3,
+                altitudeKm: 548.7,
+                velocityKmPerSec: SIMD3(6.9, 1.8, 0.2)
+            )
+        )
+        let second = TrackedSatellite(
+            satellite: Satellite(
+                id: 45955,
+                name: "BLUEBIRD-2",
+                tleLine1: "1 45955U 20040A   26036.13484363  .00004642  00000+0  37482-3 0  9998",
+                tleLine2: "2 45955  53.0539 293.2265 0001579  90.5216 269.6102 15.06348287306616",
+                epoch: now
+            ),
+            position: SatellitePosition(
+                timestamp: now,
+                latitudeDegrees: 18.2,
+                longitudeDegrees: -32.6,
+                altitudeKm: 546.1,
+                velocityKmPerSec: SIMD3(6.7, 2.1, -0.3)
+            )
+        )
+        return [first, second]
+    }()
+}

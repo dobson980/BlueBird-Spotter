@@ -74,6 +74,41 @@ struct TrackingViewModelTests {
         }
     }
 
+    /// Service stub that always throws a specific error.
+    private actor ErrorService: CelesTrakTLEService {
+        private let thrownError: Error
+
+        init(thrownError: Error) {
+            self.thrownError = thrownError
+        }
+
+        func fetchTLEText(nameQuery: String, cacheMetadata: TLECacheMetadata?) async throws -> TLEFetchResult {
+            throw thrownError
+        }
+
+        func fetchTLEs(nameQuery: String) async throws -> [TLE] {
+            throw thrownError
+        }
+
+        nonisolated static func parseTLEText(_ text: String) throws -> [TLE] {
+            try CelesTrakTLEClient.parseTLEText(text)
+        }
+    }
+
+    /// Orbit engine stub that always fails propagation.
+    private struct AlwaysFailOrbitEngine: OrbitEngine {
+        private struct OrbitFailure: Error {}
+
+        func position(for satellite: Satellite, at date: Date) throws -> SatellitePosition {
+            throw OrbitFailure()
+        }
+    }
+
+    /// Helper error used to verify unexpected error messaging.
+    private enum UnexpectedFailure: Error {
+        case failed
+    }
+
     /// Generates a small, valid 3-line TLE block for tests.
     private func makeText(name: String) -> String {
         """
@@ -114,6 +149,30 @@ struct TrackingViewModelTests {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         return false
+    }
+
+    /// Waits for the view model to publish an error string.
+    @MainActor
+    private func waitForError(in viewModel: TrackingViewModel) async -> String? {
+        for _ in 0..<50 {
+            if let message = viewModel.state.error {
+                return message
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return nil
+    }
+
+    /// Creates a repository that always throws from the remote service.
+    private func makeFailingRepository(error: Error) async throws -> TLERepository {
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+
+        return TLERepository(
+            service: ErrorService(thrownError: error),
+            cacheStore: TLECacheStore(directory: cacheDirectory)
+        )
     }
 
     /// Ensures startTracking begins producing updates from ticks.
@@ -185,5 +244,60 @@ struct TrackingViewModelTests {
         #expect(didUpdate)
         #expect(secondPosition?.timestamp == secondTick)
         #expect(firstPosition != secondPosition)
+    }
+
+    /// Ensures typed repository errors are surfaced with a user-friendly message.
+    @Test @MainActor func startTracking_onTypedRepositoryError_setsErrorState() async throws {
+        let ticker = ManualTicker()
+        let repository = try await makeFailingRepository(error: CelesTrakError.badStatus(503))
+        let viewModel = TrackingViewModel(
+            repository: repository,
+            orbitEngine: StubOrbitEngine(),
+            ticker: ticker
+        )
+
+        viewModel.startTracking(queryKey: "SPACEMOBILE")
+
+        let message = await waitForError(in: viewModel)
+        #expect(message?.contains("503") == true)
+        #expect(viewModel.trackedSatellites.isEmpty)
+        #expect(viewModel.lastUpdatedAt == nil)
+        #expect(viewModel.lastTLEFetchedAt == nil)
+    }
+
+    /// Ensures unexpected failures use the generic fallback error message.
+    @Test @MainActor func startTracking_onUnexpectedError_usesFallbackMessage() async throws {
+        let ticker = ManualTicker()
+        let repository = try await makeFailingRepository(error: UnexpectedFailure.failed)
+        let viewModel = TrackingViewModel(
+            repository: repository,
+            orbitEngine: StubOrbitEngine(),
+            ticker: ticker
+        )
+
+        viewModel.startTracking(queryKey: "SPACEMOBILE")
+
+        let message = await waitForError(in: viewModel)
+        #expect(message?.contains("unexpected error occurred") == true)
+    }
+
+    /// Ensures orbit-propagation failures skip satellites instead of crashing the loop.
+    @Test @MainActor func tracking_withOrbitFailures_stillPublishesEmptyLoadedState() async throws {
+        let ticker = ManualTicker()
+        let repository = try await makeRepository(withText: makeText(name: "DELTA"))
+        let viewModel = TrackingViewModel(
+            repository: repository,
+            orbitEngine: AlwaysFailOrbitEngine(),
+            ticker: ticker
+        )
+
+        viewModel.startTracking(queryKey: "SPACEMOBILE")
+        let tick = Date(timeIntervalSince1970: 4_000)
+        await ticker.send(tick)
+
+        let didUpdate = await waitForUpdate(matching: tick, in: viewModel)
+        #expect(didUpdate)
+        #expect(viewModel.trackedSatellites.isEmpty)
+        #expect(viewModel.state.data?.isEmpty == true)
     }
 }

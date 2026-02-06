@@ -85,3 +85,67 @@ struct GlobeDebugStatsOverlay: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 }
+
+/// Preview container that provides mutable state bindings for debug controls.
+private struct GlobeDebugRenderControlsPreviewHost: View {
+    @State private var satelliteScale: Double = 0.003
+    @State private var satelliteBaseYawDegrees: Double = 0
+    @State private var satelliteBasePitchDegrees: Double = 0
+    @State private var satelliteBaseRollDegrees: Double = 45
+    @State private var satelliteOrbitHeadingDegrees: Double = 45
+    @State private var satelliteNadirPointing = true
+    @State private var satelliteYawFollowsOrbit = true
+
+    var body: some View {
+        GlobeDebugRenderControls(
+            satelliteScale: $satelliteScale,
+            satelliteBaseYawDegrees: $satelliteBaseYawDegrees,
+            satelliteBasePitchDegrees: $satelliteBasePitchDegrees,
+            satelliteBaseRollDegrees: $satelliteBaseRollDegrees,
+            satelliteOrbitHeadingDegrees: $satelliteOrbitHeadingDegrees,
+            satelliteNadirPointing: $satelliteNadirPointing,
+            satelliteYawFollowsOrbit: $satelliteYawFollowsOrbit,
+            onReset: {
+                // Reset mirrors the same baseline used by the live debug panel.
+                satelliteScale = 0.003
+                satelliteBaseYawDegrees = 0
+                satelliteBasePitchDegrees = 0
+                satelliteBaseRollDegrees = 45
+                satelliteOrbitHeadingDegrees = 45
+                satelliteNadirPointing = true
+                satelliteYawFollowsOrbit = true
+            }
+        )
+        .padding()
+    }
+}
+
+/// Preview for tuning slider and toggle layout in the debug controls panel.
+#Preview("Render Controls") {
+    GlobeDebugRenderControlsPreviewHost()
+}
+
+/// Preview for validating populated render diagnostics.
+#Preview("Stats Populated") {
+    GlobeDebugStatsOverlay(
+        trackedCount: 2,
+        renderStats: GlobeRenderStats(
+            trackedCount: 2,
+            nodeCount: 5,
+            usesModelTemplates: true,
+            templateLoaded: true,
+            isPreview: true,
+            isSimulator: true
+        )
+    )
+    .padding()
+}
+
+/// Preview for validating empty diagnostics fallback values.
+#Preview("Stats Empty") {
+    GlobeDebugStatsOverlay(
+        trackedCount: 0,
+        renderStats: nil
+    )
+    .padding()
+}

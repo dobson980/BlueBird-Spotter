@@ -284,23 +284,55 @@ struct TLEListView: View {
     }
 }
 
-/// Preview for quickly checking the TLE list layout in Xcode.
-#Preview {
-    TLEListView(viewModel: .previewModel())
+/// Preview for quickly checking a successful TLE load state.
+#Preview("Loaded") {
+    TLEListView(viewModel: .previewLoadedModel())
+        // Inject navigation state so row tap gestures can resolve environment lookups.
+        .environment(AppNavigationState())
+}
+
+/// Preview for validating loading skeleton and toolbar disabled states.
+#Preview("Loading") {
+    TLEListView(viewModel: .previewLoadingModel())
+        .environment(AppNavigationState())
+}
+
+/// Preview for validating readable error messaging.
+#Preview("Error") {
+    TLEListView(viewModel: .previewErrorModel())
+        .environment(AppNavigationState())
 }
 
 private extension CelesTrakViewModel {
-    /// Provides sample data for previewing the TLE list without network access.
-    static func previewModel() -> CelesTrakViewModel {
-        let viewModel = CelesTrakViewModel()
-        let sampleTles = [
+    /// Shared sample records used by preview states.
+    static var previewSampleTLEs: [TLE] {
+        [
             TLE(name: "BLUEBIRD-1", line1: "1 00001U 98067A   20344.12345678  .00001234  00000-0  10270-3 0  9991", line2: "2 00001  51.6431  21.2862 0007417  92.3844  10.1234 15.48912345123456"),
             TLE(name: "BLUEBIRD-2", line1: "1 00002U 98067A   20344.22345678  .00001234  00000-0  10270-3 0  9992", line2: "2 00002  51.6431  21.2862 0007417  92.3844  10.1234 15.48912345123456")
         ]
-        viewModel.tles = sampleTles
-        viewModel.state = .loaded(sampleTles)
+    }
+
+    /// Shows the common "loaded" path so contributors can tune card layout quickly.
+    static func previewLoadedModel() -> CelesTrakViewModel {
+        let viewModel = CelesTrakViewModel()
+        viewModel.tles = previewSampleTLEs
+        viewModel.state = .loaded(previewSampleTLEs)
         viewModel.lastFetchedAt = Date()
         viewModel.dataAge = 120
+        return viewModel
+    }
+
+    /// Shows loading UI without requiring any network calls in previews.
+    static func previewLoadingModel() -> CelesTrakViewModel {
+        let viewModel = CelesTrakViewModel()
+        viewModel.state = .loading
+        return viewModel
+    }
+
+    /// Shows error UI so message wrapping and red styling are easy to verify.
+    static func previewErrorModel() -> CelesTrakViewModel {
+        let viewModel = CelesTrakViewModel()
+        viewModel.state = .error("Unable to fetch TLE data right now. Please try again in a moment.")
         return viewModel
     }
 }

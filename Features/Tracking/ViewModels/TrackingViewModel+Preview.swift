@@ -9,12 +9,8 @@ import Foundation
 
 /// Preview helpers for `TrackingViewModel` so SwiftUI previews stay self-contained.
 extension TrackingViewModel {
-    /// Provides sample tracking data without any network access.
-    ///
-    /// This keeps previews fast and deterministic while demonstrating the same UI
-    /// shape as live tracking updates.
-    static func previewModel() -> TrackingViewModel {
-        let viewModel = TrackingViewModel()
+    /// Shared preview satellite list so multiple preview states stay consistent.
+    static var previewTrackedSatellites: [TrackedSatellite] {
         let now = Date()
         let sampleSatellite = Satellite(
             id: 12345,
@@ -30,11 +26,40 @@ extension TrackingViewModel {
             altitudeKm: 550.2,
             velocityKmPerSec: nil
         )
-        let tracked = [TrackedSatellite(satellite: sampleSatellite, position: samplePosition)]
+        return [TrackedSatellite(satellite: sampleSatellite, position: samplePosition)]
+    }
+
+    /// Provides sample tracking data without any network access.
+    ///
+    /// This keeps previews fast and deterministic while demonstrating the same UI
+    /// shape as live tracking updates.
+    static func previewLoadedModel() -> TrackingViewModel {
+        let viewModel = TrackingViewModel()
+        let tracked = previewTrackedSatellites
         viewModel.trackedSatellites = tracked
         viewModel.state = .loaded(tracked)
-        viewModel.lastUpdatedAt = now
-        viewModel.lastTLEFetchedAt = now
+        viewModel.lastUpdatedAt = tracked.first?.position.timestamp
+        viewModel.lastTLEFetchedAt = tracked.first?.position.timestamp
+        return viewModel
+    }
+
+    /// Provides a loading state preview for quick UI tuning.
+    static func previewLoadingModel() -> TrackingViewModel {
+        let viewModel = TrackingViewModel()
+        viewModel.state = .loading
+        return viewModel
+    }
+
+    /// Provides an error state preview for validating message and icon behavior.
+    static func previewErrorModel() -> TrackingViewModel {
+        let viewModel = TrackingViewModel()
+        viewModel.state = .error("Tracking could not start because TLE data is temporarily unavailable.")
+        return viewModel
+    }
+
+    /// Backwards-compatible alias used by existing preview call sites.
+    static func previewModel() -> TrackingViewModel {
+        let viewModel = previewLoadedModel()
         return viewModel
     }
 }

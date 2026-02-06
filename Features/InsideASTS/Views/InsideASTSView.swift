@@ -412,7 +412,14 @@ struct InsideASTSView: View {
     }
 }
 
-/// Preview for quickly validating the information tab layout.
-#Preview {
+/// Preview for quickly validating the information tab layout in dark mode.
+#Preview("Dark") {
     InsideASTSView()
+        .preferredColorScheme(.dark)
+}
+
+/// Preview for validating card contrast and readability in light mode.
+#Preview("Light") {
+    InsideASTSView()
+        .preferredColorScheme(.light)
 }

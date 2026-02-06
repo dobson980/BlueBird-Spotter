@@ -133,6 +133,7 @@ extension GlobeSceneCoordinator {
            let selectedUpdate = updates.first(where: { $0.id == selectedId }) {
             updateSelectionIndicator(
                 attachedTo: selectedUpdate.node,
+                satelliteId: selectedUpdate.id,
                 in: scene
             )
         } else {

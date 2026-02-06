@@ -42,9 +42,14 @@ struct GlobeView: View {
     @AppStorage("globe.satellite.yawFollowsOrbit") private var satelliteYawFollowsOrbit = SatelliteRenderConfig.debugDefaults.yawFollowsOrbit
     #endif
 
-    /// Allows previews to inject a prepared view model.
+    /// Builds a globe view using a tracking view model for live position updates.
     init(viewModel: TrackingViewModel = TrackingViewModel()) {
         _viewModel = State(initialValue: GlobeViewModel(trackingViewModel: viewModel))
+    }
+
+    /// Allows previews to inject a fully prepared globe view model state.
+    init(globeViewModel: GlobeViewModel) {
+        _viewModel = State(initialValue: globeViewModel)
     }
 
     var body: some View {
@@ -335,7 +340,42 @@ struct GlobeView: View {
     }
 }
 
-/// Preview for validating the globe overlay layout.
-#Preview {
-    GlobeView(viewModel: .previewModel())
+/// Preview for validating the default globe composition.
+#Preview("Default") {
+    GlobeView(globeViewModel: .previewDefault())
+        // Inject navigation state so focus and selection bindings resolve in preview.
+        .environment(AppNavigationState())
+}
+
+/// Preview for validating the selection overlay card style and values.
+#Preview("Selection Overlay") {
+    GlobeView(globeViewModel: .previewWithSelection())
+        .environment(AppNavigationState())
+}
+
+/// Preview for validating the settings panel layout and control spacing.
+#Preview("Settings Panel") {
+    GlobeView(globeViewModel: .previewWithSettingsExpanded())
+        .environment(AppNavigationState())
+}
+
+private extension GlobeViewModel {
+    /// Baseline preview state with tracked satellites and no modal UI.
+    static func previewDefault() -> GlobeViewModel {
+        GlobeViewModel(trackingViewModel: .previewLoadedModel())
+    }
+
+    /// Preview state that forces one selected satellite for overlay validation.
+    static func previewWithSelection() -> GlobeViewModel {
+        let viewModel = GlobeViewModel(trackingViewModel: .previewLoadedModel())
+        viewModel.selectedSatelliteId = TrackingViewModel.previewTrackedSatellites.first?.satellite.id
+        return viewModel
+    }
+
+    /// Preview state that opens the settings panel for quick control iteration.
+    static func previewWithSettingsExpanded() -> GlobeViewModel {
+        let viewModel = GlobeViewModel(trackingViewModel: .previewLoadedModel())
+        viewModel.isSettingsExpanded = true
+        return viewModel
+    }
 }
