@@ -35,19 +35,39 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		78B4E1C92EF6245B00DF3FC9 /* BlueBird Spotter */ = {
+		78B4E1C92EF6245B00DF3FC9 /* App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "BlueBird Spotter";
+			path = App;
 			sourceTree = "<group>";
 		};
-		78B4E1D72EF6245C00DF3FC9 /* BlueBird SpotterTests */ = {
+		78B4E1D72EF6245C00DF3FC9 /* Tests/Unit */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "BlueBird SpotterTests";
+			path = Tests/Unit;
 			sourceTree = "<group>";
 		};
-		78B4E1E12EF6245C00DF3FC9 /* BlueBird SpotterUITests */ = {
+		78B4E1E12EF6245C00DF3FC9 /* Tests/UI */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "BlueBird SpotterUITests";
+			path = Tests/UI;
+			sourceTree = "<group>";
+		};
+		7A1111112F00000100A10001 /* Features */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Features;
+			sourceTree = "<group>";
+		};
+		7A1111112F00000100A10002 /* Core */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Core;
+			sourceTree = "<group>";
+		};
+		7A1111112F00000100A10003 /* Services */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Services;
+			sourceTree = "<group>";
+		};
+		7A1111112F00000100A10004 /* Resources */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -82,9 +102,13 @@
 		78B4E1BE2EF6245B00DF3FC9 = {
 			isa = PBXGroup;
 			children = (
-				78B4E1C92EF6245B00DF3FC9 /* BlueBird Spotter */,
-				78B4E1D72EF6245C00DF3FC9 /* BlueBird SpotterTests */,
-				78B4E1E12EF6245C00DF3FC9 /* BlueBird SpotterUITests */,
+				78B4E1C92EF6245B00DF3FC9 /* App */,
+				7A1111112F00000100A10001 /* Features */,
+				7A1111112F00000100A10002 /* Core */,
+				7A1111112F00000100A10003 /* Services */,
+				7A1111112F00000100A10004 /* Resources */,
+				78B4E1D72EF6245C00DF3FC9 /* Tests/Unit */,
+				78B4E1E12EF6245C00DF3FC9 /* Tests/UI */,
 				78B4E1C82EF6245B00DF3FC9 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -115,7 +139,11 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				78B4E1C92EF6245B00DF3FC9 /* BlueBird Spotter */,
+				78B4E1C92EF6245B00DF3FC9 /* App */,
+				7A1111112F00000100A10001 /* Features */,
+				7A1111112F00000100A10002 /* Core */,
+				7A1111112F00000100A10003 /* Services */,
+				7A1111112F00000100A10004 /* Resources */,
 			);
 			name = "BlueBird Spotter";
 			packageProductDependencies = (
@@ -139,7 +167,7 @@
 				78B4E1D62EF6245C00DF3FC9 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				78B4E1D72EF6245C00DF3FC9 /* BlueBird SpotterTests */,
+				78B4E1D72EF6245C00DF3FC9 /* Tests/Unit */,
 			);
 			name = "BlueBird SpotterTests";
 			packageProductDependencies = (
@@ -163,7 +191,7 @@
 				78B4E1E02EF6245C00DF3FC9 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				78B4E1E12EF6245C00DF3FC9 /* BlueBird SpotterUITests */,
+				78B4E1E12EF6245C00DF3FC9 /* Tests/UI */,
 			);
 			name = "BlueBird SpotterUITests";
 			packageProductDependencies = (
