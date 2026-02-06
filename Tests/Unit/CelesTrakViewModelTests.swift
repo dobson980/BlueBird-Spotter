@@ -38,6 +38,17 @@ struct CelesTrakViewModelTests {
         )
     }
 
+    /// Creates isolated UserDefaults storage for cooldown persistence tests.
+    ///
+    /// Each test receives a unique suite name so persisted values never leak
+    /// across test cases, keeping assertions deterministic.
+    private func makeIsolatedUserDefaults() -> UserDefaults {
+        let suiteName = "CelesTrakViewModelTests.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+        return userDefaults
+    }
+
     /// Confirms fetch sorts names and publishes metadata for the UI.
     @Test @MainActor func fetchTLEs_success_sortsAndPublishesMetadata() async {
         let fetchedAt = Date(timeIntervalSince1970: 1_000)
@@ -122,6 +133,61 @@ struct CelesTrakViewModelTests {
         #expect(viewModel.refreshNotice?.message.contains("automatic background refresh") == true)
         #expect(viewModel.lastFetchedAt == firstRefreshFetchedAt)
         #expect(viewModel.state.data == viewModel.tles)
+    }
+
+    /// Confirms cooldown survives view model recreation via persisted timestamp.
+    @Test @MainActor func refreshTLEs_persistsCooldownAcrossViewModelRecreation() async {
+        let refreshCounter = CallCounter()
+        let refreshResult = makeResult(names: ["From Refresh"], fetchedAt: Date(timeIntervalSince1970: 4_500))
+        let userDefaults = makeIsolatedUserDefaults()
+        let cooldownPersistence = CelesTrakViewModel.ManualRefreshCooldownPersistence.userDefaults(
+            userDefaults,
+            key: "BlueBirdSpotter.Tests.LastManualRefreshAttempt"
+        )
+
+        let firstViewModel = CelesTrakViewModel(
+            fetchHandler: { _ in refreshResult },
+            refreshHandler: { _ in
+                await refreshCounter.increment()
+                return refreshResult
+            },
+            cooldownPersistence: cooldownPersistence
+        )
+        await firstViewModel.refreshTLEs(nameQuery: "SPACEMOBILE")
+
+        let recreatedViewModel = CelesTrakViewModel(
+            fetchHandler: { _ in refreshResult },
+            refreshHandler: { _ in
+                await refreshCounter.increment()
+                return refreshResult
+            },
+            cooldownPersistence: cooldownPersistence
+        )
+        await recreatedViewModel.refreshTLEs(nameQuery: "SPACEMOBILE")
+
+        #expect(await refreshCounter.value() == 1)
+        #expect(recreatedViewModel.refreshNotice?.title == "Refresh Limited")
+        #expect(recreatedViewModel.nextManualRefreshDate != nil)
+    }
+
+    /// Confirms expired persisted cooldown state is ignored on startup.
+    @Test @MainActor func init_withExpiredPersistedCooldown_clearsCooldownState() async {
+        let refreshResult = makeResult(names: ["From Refresh"], fetchedAt: Date(timeIntervalSince1970: 4_700))
+        let userDefaults = makeIsolatedUserDefaults()
+        let key = "BlueBirdSpotter.Tests.ExpiredManualRefreshAttempt"
+        let now = Date(timeIntervalSince1970: 100_000)
+        let expiredAttempt = now.addingTimeInterval(-3_600)
+        userDefaults.set(expiredAttempt.timeIntervalSince1970, forKey: key)
+
+        let viewModel = CelesTrakViewModel(
+            fetchHandler: { _ in refreshResult },
+            manualRefreshInterval: 900,
+            now: { now },
+            cooldownPersistence: .userDefaults(userDefaults, key: key)
+        )
+
+        #expect(viewModel.nextManualRefreshDate == nil)
+        #expect(userDefaults.object(forKey: key) == nil)
     }
 
     /// Confirms a new manual refresh is allowed again once cooldown expires.

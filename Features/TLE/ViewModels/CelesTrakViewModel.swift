@@ -26,6 +26,46 @@ final class CelesTrakViewModel {
         let message: String
     }
 
+    /// Storage strategy for persisting manual refresh cooldown timestamps.
+    ///
+    /// The app uses this in production so cooldown survives app restarts.
+    /// Tests can inject `.disabled` to avoid cross-test shared state.
+    struct ManualRefreshCooldownPersistence {
+        /// Reads the most recent manual refresh attempt timestamp.
+        let loadLastAttempt: () -> Date?
+        /// Persists the latest manual refresh attempt timestamp.
+        let saveLastAttempt: (Date) -> Void
+        /// Clears the persisted timestamp when no cooldown should apply.
+        let clearLastAttempt: () -> Void
+
+        /// No-op storage used by tests and previews.
+        static let disabled = ManualRefreshCooldownPersistence(
+            loadLastAttempt: { nil },
+            saveLastAttempt: { _ in },
+            clearLastAttempt: {}
+        )
+
+        /// UserDefaults-backed storage used by the production app.
+        static func userDefaults(
+            _ userDefaults: UserDefaults = .standard,
+            key: String = "BlueBirdSpotter.TLE.LastManualRefreshAttempt"
+        ) -> ManualRefreshCooldownPersistence {
+            ManualRefreshCooldownPersistence(
+                loadLastAttempt: {
+                    let value = userDefaults.double(forKey: key)
+                    guard value > 0 else { return nil }
+                    return Date(timeIntervalSince1970: value)
+                },
+                saveLastAttempt: { date in
+                    userDefaults.set(date.timeIntervalSince1970, forKey: key)
+                },
+                clearLastAttempt: {
+                    userDefaults.removeObject(forKey: key)
+                }
+            )
+        }
+    }
+
     /// Injected fetcher to support testing or alternate data sources.
     private let fetchHandler: @Sendable (String) async throws -> TLERepositoryResult
     /// Injected refresh handler for manual refresh requests.
@@ -34,6 +74,8 @@ final class CelesTrakViewModel {
     private let now: @Sendable () -> Date
     /// Manual refresh cooldown, in seconds, to protect upstream API limits.
     private let manualRefreshInterval: TimeInterval
+    /// Persistence adapter that keeps cooldown state across app restarts.
+    private let cooldownPersistence: ManualRefreshCooldownPersistence
 
     /// Latest fetched list for views that want direct access.
     var tles: [TLE] = []
@@ -63,24 +105,30 @@ final class CelesTrakViewModel {
     init(
         repository: TLERepository = TLERepository.shared,
         manualRefreshInterval: TimeInterval = 15 * 60,
-        now: @escaping @Sendable () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init,
+        cooldownPersistence: ManualRefreshCooldownPersistence = .userDefaults()
     ) {
         self.fetchHandler = repository.getTLEs
         self.refreshHandler = repository.refreshTLEs
         self.manualRefreshInterval = manualRefreshInterval
         self.now = now
+        self.cooldownPersistence = cooldownPersistence
+        restorePersistedManualRefreshAttemptIfNeeded()
     }
 
     /// Test-friendly initializer that injects a custom fetch closure.
     init(
         fetchHandler: @escaping @Sendable (String) async throws -> TLERepositoryResult,
         manualRefreshInterval: TimeInterval = 15 * 60,
-        now: @escaping @Sendable () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init,
+        cooldownPersistence: ManualRefreshCooldownPersistence = .disabled
     ) {
         self.fetchHandler = fetchHandler
         self.refreshHandler = fetchHandler
         self.manualRefreshInterval = manualRefreshInterval
         self.now = now
+        self.cooldownPersistence = cooldownPersistence
+        restorePersistedManualRefreshAttemptIfNeeded()
     }
 
     /// Test-friendly initializer for separate fetch and refresh behaviors.
@@ -88,12 +136,15 @@ final class CelesTrakViewModel {
         fetchHandler: @escaping @Sendable (String) async throws -> TLERepositoryResult,
         refreshHandler: @escaping @Sendable (String) async throws -> TLERepositoryResult,
         manualRefreshInterval: TimeInterval = 15 * 60,
-        now: @escaping @Sendable () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init,
+        cooldownPersistence: ManualRefreshCooldownPersistence = .disabled
     ) {
         self.fetchHandler = fetchHandler
         self.refreshHandler = refreshHandler
         self.manualRefreshInterval = manualRefreshInterval
         self.now = now
+        self.cooldownPersistence = cooldownPersistence
+        restorePersistedManualRefreshAttemptIfNeeded()
     }
 
     /// Loads TLEs and updates state for the view layer.
@@ -112,12 +163,12 @@ final class CelesTrakViewModel {
     /// Triggers a foreground refresh that bypasses cache staleness checks.
     func refreshTLEs(nameQuery: String) async {
         if let nextManualRefreshDate {
-            refreshNotice = makeManualRefreshCooldownNotice(nextAllowedRefreshDate: nextManualRefreshDate)
+            refreshNotice = manualRefreshCooldownNotice(nextAllowedRefreshDate: nextManualRefreshDate)
             return
         }
 
         refreshNotice = nil
-        lastManualRefreshAttemptAt = now()
+        recordManualRefreshAttempt(at: now())
         await loadTLEs(
             using: refreshHandler,
             nameQuery: nameQuery,
@@ -131,6 +182,14 @@ final class CelesTrakViewModel {
     /// Views call this after the user dismisses the alert.
     func clearRefreshNotice() {
         refreshNotice = nil
+    }
+
+    /// Formats a refresh timestamp as short relative text for UI labels.
+    ///
+    /// Keeping this inside the view model ensures the list header and alert
+    /// message use the same formatting rules across the feature.
+    func relativeRefreshTimeText(for date: Date) -> String {
+        relativeTimeText(for: date)
     }
 
     /// Shared load path for fetch and refresh actions.
@@ -200,8 +259,9 @@ final class CelesTrakViewModel {
 
     /// Builds plain-English guidance for users who tap refresh before cooldown ends.
     ///
-    /// The text explains both the API protection reason and practical TLE cadence.
-    private func makeManualRefreshCooldownNotice(nextAllowedRefreshDate: Date) -> RefreshNotice {
+    /// This remains internal so runtime code and preview code can reuse the
+    /// exact same copy and time-formatting behavior.
+    func manualRefreshCooldownNotice(nextAllowedRefreshDate: Date) -> RefreshNotice {
         let cooldownMinutes = max(1, Int((manualRefreshInterval / 60).rounded()))
         let availableAtText = refreshTimeText(for: nextAllowedRefreshDate)
         let relativeAvailableText = relativeTimeText(for: nextAllowedRefreshDate)
@@ -261,5 +321,33 @@ final class CelesTrakViewModel {
         formatter.unitsStyle = .short
         formatter.dateTimeStyle = .numeric
         return formatter.localizedString(for: date, relativeTo: now())
+    }
+
+    /// Records a manual refresh tap and persists it for future app sessions.
+    ///
+    /// Persisting the timestamp prevents users from bypassing cooldown by
+    /// killing and reopening the app or recreating the view model.
+    private func recordManualRefreshAttempt(at date: Date) {
+        lastManualRefreshAttemptAt = date
+        cooldownPersistence.saveLastAttempt(date)
+    }
+
+    /// Restores persisted cooldown state on initialization when still valid.
+    ///
+    /// If the stored cooldown has already expired, this method clears it so
+    /// future startups begin from a clean state.
+    private func restorePersistedManualRefreshAttemptIfNeeded() {
+        guard let persistedAttempt = cooldownPersistence.loadLastAttempt() else {
+            lastManualRefreshAttemptAt = nil
+            return
+        }
+
+        let persistedExpiry = persistedAttempt.addingTimeInterval(manualRefreshInterval)
+        if persistedExpiry > now() {
+            lastManualRefreshAttemptAt = persistedAttempt
+        } else {
+            lastManualRefreshAttemptAt = nil
+            cooldownPersistence.clearLastAttempt()
+        }
     }
 }

@@ -113,7 +113,7 @@ struct TLEListView: View {
                 refreshMetadataRow(
                     iconName: "sparkles",
                     label: "Last Updated",
-                    value: relativeTimeText(for: lastFetchedAt)
+                    value: viewModel.relativeRefreshTimeText(for: lastFetchedAt)
                 )
             } else if viewModel.state.isLoading {
                 HStack(spacing: 6) {
@@ -134,7 +134,7 @@ struct TLEListView: View {
                 refreshMetadataRow(
                     iconName: "clock",
                     label: "Next Refresh",
-                    value: relativeTimeText(for: nextManualRefreshDate)
+                    value: viewModel.relativeRefreshTimeText(for: nextManualRefreshDate)
                 )
             }
         }
@@ -336,15 +336,6 @@ struct TLEListView: View {
         )
     }
 
-    /// Builds concise relative time strings so toolbar metadata stays easy to scan.
-    ///
-    /// Using short units avoids second-level churn and visual jumping.
-    private func relativeTimeText(for date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        formatter.dateTimeStyle = .numeric
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
 }
 
 /// Preview for quickly checking a successful TLE load state.
@@ -400,7 +391,7 @@ private extension CelesTrakViewModel {
 
     /// Shows the common "loaded" path so contributors can tune card layout quickly.
     static func previewLoadedModel() -> CelesTrakViewModel {
-        let viewModel = CelesTrakViewModel()
+        let viewModel = CelesTrakViewModel(cooldownPersistence: .disabled)
         viewModel.tles = previewSampleTLEs
         viewModel.state = .loaded(previewSampleTLEs)
         viewModel.lastFetchedAt = Date()
@@ -410,34 +401,23 @@ private extension CelesTrakViewModel {
 
     /// Shows loading UI without requiring any network calls in previews.
     static func previewLoadingModel() -> CelesTrakViewModel {
-        let viewModel = CelesTrakViewModel()
+        let viewModel = CelesTrakViewModel(cooldownPersistence: .disabled)
         viewModel.state = .loading
         return viewModel
     }
 
     /// Shows error UI so message wrapping and red styling are easy to verify.
     static func previewErrorModel() -> CelesTrakViewModel {
-        let viewModel = CelesTrakViewModel()
+        let viewModel = CelesTrakViewModel(cooldownPersistence: .disabled)
         viewModel.state = .error("Unable to fetch TLE data right now. Please try again in a moment.")
         return viewModel
     }
 
     /// Shared preview alert content so preview setups stay in sync.
     static var previewRefreshLimitedNotice: CelesTrakViewModel.RefreshNotice {
-        CelesTrakViewModel.RefreshNotice(
-            title: "Refresh Limited",
-            message: """
-            Manual refresh is available once every 15 minutes.
-
-            Why this limit exists:
-            - It protects the CelesTrak API from rate limiting.
-            - TLE sets usually update only a few times each day.
-            - The app also attempts automatic background refresh when cached data becomes stale.
-
-            Next refresh: 6:45 PM (in 14 min.).
-
-            Your current TLE set stays visible until a new refresh succeeds.
-            """
+        let viewModel = previewLoadedModel()
+        return viewModel.manualRefreshCooldownNotice(
+            nextAllowedRefreshDate: Date().addingTimeInterval(14 * 60)
         )
     }
 }
