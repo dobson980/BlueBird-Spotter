@@ -36,6 +36,13 @@ struct ContentView: View {
                     Label("Globe", systemImage: "globe.americas.fill")
                 }
                 .tag(AppTab.globe)
+
+            // The inside tab explains ASTS context and app behavior in simple language.
+            InsideASTSView()
+                .tabItem {
+                    Label("Info", systemImage: "info.circle.fill")
+                }
+                .tag(AppTab.insideASTS)
         }
         // Let tab content flow under the tab bar so it feels like a floating glass overlay.
         .ignoresSafeArea(.container, edges: .bottom)

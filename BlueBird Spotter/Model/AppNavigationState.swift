@@ -13,6 +13,7 @@ enum AppTab: Hashable {
     case tles
     case tracking
     case globe
+    case insideASTS
 }
 
 /// Represents a request to focus the globe camera on a specific satellite.
