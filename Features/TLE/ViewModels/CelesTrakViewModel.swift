@@ -15,10 +15,25 @@ import Observation
 @MainActor
 @Observable
 final class CelesTrakViewModel {
+    /// Plain-English alert payload shown when manual refresh actions are blocked.
+    ///
+    /// Keeping this as a small value type makes it easy for SwiftUI views
+    /// to present and dismiss notices without pulling in service logic.
+    struct RefreshNotice: Equatable {
+        /// Short heading displayed by the alert.
+        let title: String
+        /// Longer explanation that tells the user what happened and why.
+        let message: String
+    }
+
     /// Injected fetcher to support testing or alternate data sources.
     private let fetchHandler: @Sendable (String) async throws -> TLERepositoryResult
     /// Injected refresh handler for manual refresh requests.
     private let refreshHandler: @Sendable (String) async throws -> TLERepositoryResult
+    /// Clock injection for deterministic tests and readable time logic.
+    private let now: @Sendable () -> Date
+    /// Manual refresh cooldown, in seconds, to protect upstream API limits.
+    private let manualRefreshInterval: TimeInterval
 
     /// Latest fetched list for views that want direct access.
     var tles: [TLE] = []
@@ -28,44 +43,102 @@ final class CelesTrakViewModel {
     var lastFetchedAt: Date?
     /// Age of the data in seconds, computed when a result arrives.
     var dataAge: TimeInterval?
+    /// Optional alert payload shown for blocked/failed manual refresh attempts.
+    var refreshNotice: RefreshNotice?
+    /// Stores the latest manual refresh attempt so cooldown checks are consistent.
+    private var lastManualRefreshAttemptAt: Date?
+
+    /// Next moment when manual refresh is allowed again, or `nil` if available now.
+    ///
+    /// This is derived from the most recent manual refresh attempt, not only
+    /// successful requests. That protects the API from rapid repeated taps.
+    var nextManualRefreshDate: Date? {
+        guard let lastManualRefreshAttemptAt else { return nil }
+        let nextAllowedRefreshDate = lastManualRefreshAttemptAt.addingTimeInterval(manualRefreshInterval)
+        guard nextAllowedRefreshDate > now() else { return nil }
+        return nextAllowedRefreshDate
+    }
 
     /// Default initializer that uses the shared production repository.
-    init(repository: TLERepository = TLERepository.shared) {
+    init(
+        repository: TLERepository = TLERepository.shared,
+        manualRefreshInterval: TimeInterval = 15 * 60,
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
         self.fetchHandler = repository.getTLEs
         self.refreshHandler = repository.refreshTLEs
+        self.manualRefreshInterval = manualRefreshInterval
+        self.now = now
     }
 
     /// Test-friendly initializer that injects a custom fetch closure.
-    init(fetchHandler: @escaping @Sendable (String) async throws -> TLERepositoryResult) {
+    init(
+        fetchHandler: @escaping @Sendable (String) async throws -> TLERepositoryResult,
+        manualRefreshInterval: TimeInterval = 15 * 60,
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
         self.fetchHandler = fetchHandler
         self.refreshHandler = fetchHandler
+        self.manualRefreshInterval = manualRefreshInterval
+        self.now = now
     }
 
     /// Test-friendly initializer for separate fetch and refresh behaviors.
     init(
         fetchHandler: @escaping @Sendable (String) async throws -> TLERepositoryResult,
-        refreshHandler: @escaping @Sendable (String) async throws -> TLERepositoryResult
+        refreshHandler: @escaping @Sendable (String) async throws -> TLERepositoryResult,
+        manualRefreshInterval: TimeInterval = 15 * 60,
+        now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.fetchHandler = fetchHandler
         self.refreshHandler = refreshHandler
+        self.manualRefreshInterval = manualRefreshInterval
+        self.now = now
     }
 
     /// Loads TLEs and updates state for the view layer.
     ///
     /// The method also sorts results alphabetically by satellite name.
     func fetchTLEs(nameQuery: String) async {
-        await loadTLEs(using: fetchHandler, nameQuery: nameQuery)
+        refreshNotice = nil
+        await loadTLEs(
+            using: fetchHandler,
+            nameQuery: nameQuery,
+            clearsExistingDataOnFailure: true,
+            showsRefreshFailureNotice: false
+        )
     }
 
     /// Triggers a foreground refresh that bypasses cache staleness checks.
     func refreshTLEs(nameQuery: String) async {
-        await loadTLEs(using: refreshHandler, nameQuery: nameQuery)
+        if let nextManualRefreshDate {
+            refreshNotice = makeManualRefreshCooldownNotice(nextAllowedRefreshDate: nextManualRefreshDate)
+            return
+        }
+
+        refreshNotice = nil
+        lastManualRefreshAttemptAt = now()
+        await loadTLEs(
+            using: refreshHandler,
+            nameQuery: nameQuery,
+            clearsExistingDataOnFailure: false,
+            showsRefreshFailureNotice: true
+        )
+    }
+
+    /// Clears the currently displayed refresh notice.
+    ///
+    /// Views call this after the user dismisses the alert.
+    func clearRefreshNotice() {
+        refreshNotice = nil
     }
 
     /// Shared load path for fetch and refresh actions.
     private func loadTLEs(
         using handler: @escaping @Sendable (String) async throws -> TLERepositoryResult,
-        nameQuery: String
+        nameQuery: String,
+        clearsExistingDataOnFailure: Bool,
+        showsRefreshFailureNotice: Bool
     ) async {
         guard !state.isLoading || state.error != nil else { return }
         state = .loading
@@ -85,18 +158,108 @@ final class CelesTrakViewModel {
                 }
             }
             lastFetchedAt = result.fetchedAt
-            dataAge = Date().timeIntervalSince(result.fetchedAt)
+            dataAge = now().timeIntervalSince(result.fetchedAt)
             state = .loaded(tles)
         } catch let error as CelesTrakError {
-            state = .error(error.localizedDescription)
-            tles = []
-            lastFetchedAt = nil
-            dataAge = nil
+            handleLoadFailure(
+                message: error.localizedDescription,
+                clearsExistingDataOnFailure: clearsExistingDataOnFailure,
+                showsRefreshFailureNotice: showsRefreshFailureNotice
+            )
         } catch {
-            state = .error("An unexpected error occurred: \(error)")
-            tles = []
-            lastFetchedAt = nil
-            dataAge = nil
+            handleLoadFailure(
+                message: "An unexpected error occurred: \(error)",
+                clearsExistingDataOnFailure: clearsExistingDataOnFailure,
+                showsRefreshFailureNotice: showsRefreshFailureNotice
+            )
         }
+    }
+
+    /// Handles load failures while respecting whether old data should remain visible.
+    ///
+    /// For manual refresh, this method keeps existing TLE data on-screen so users
+    /// are not penalized with an empty state just because one request failed.
+    private func handleLoadFailure(
+        message: String,
+        clearsExistingDataOnFailure: Bool,
+        showsRefreshFailureNotice: Bool
+    ) {
+        if !clearsExistingDataOnFailure, !tles.isEmpty {
+            state = .loaded(tles)
+            if showsRefreshFailureNotice {
+                refreshNotice = makeRefreshFailureNotice(message: message)
+            }
+            return
+        }
+
+        state = .error(message)
+        tles = []
+        lastFetchedAt = nil
+        dataAge = nil
+    }
+
+    /// Builds plain-English guidance for users who tap refresh before cooldown ends.
+    ///
+    /// The text explains both the API protection reason and practical TLE cadence.
+    private func makeManualRefreshCooldownNotice(nextAllowedRefreshDate: Date) -> RefreshNotice {
+        let cooldownMinutes = max(1, Int((manualRefreshInterval / 60).rounded()))
+        let availableAtText = refreshTimeText(for: nextAllowedRefreshDate)
+        let relativeAvailableText = relativeTimeText(for: nextAllowedRefreshDate)
+        let existingDataText = tles.isEmpty
+            ? "No previously downloaded TLE set is available yet."
+            : "Your current TLE set stays visible until a new refresh succeeds."
+
+        return RefreshNotice(
+            title: "Refresh Limited",
+            message: """
+            Manual refresh is available once every \(cooldownMinutes) minutes.
+
+            Why this limit exists:
+            - It protects the CelesTrak API from rate limiting.
+            - TLE sets usually update only a few times each day.
+            - The app also attempts automatic background refresh when cached data becomes stale.
+
+            Next refresh: \(availableAtText) (\(relativeAvailableText)).
+
+            \(existingDataText)
+            """
+        )
+    }
+
+    /// Builds a notice shown when an allowed manual refresh attempt fails.
+    ///
+    /// This keeps communication user-friendly while preserving older data on screen.
+    private func makeRefreshFailureNotice(message: String) -> RefreshNotice {
+        let detailText: String
+        if let lastFetchedAt {
+            detailText = "The app kept your previous TLE set from \(refreshTimeText(for: lastFetchedAt))."
+        } else {
+            detailText = "No local TLE data is available yet, so the list stays empty until the next successful fetch."
+        }
+
+        return RefreshNotice(
+            title: "Refresh Unavailable",
+            message: "\(message)\n\n\(detailText)"
+        )
+    }
+
+    /// Builds a short absolute time string for user-facing refresh guidance.
+    ///
+    /// The formatter omits the date when the timestamp is today to keep alerts compact.
+    private func refreshTimeText(for date: Date) -> String {
+        if Calendar.current.isDate(date, inSameDayAs: now()) {
+            return date.formatted(date: .omitted, time: .shortened)
+        }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    /// Builds a short relative time string used in cooldown guidance.
+    ///
+    /// This avoids second-level noise so the toolbar and alert stay visually consistent.
+    private func relativeTimeText(for date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        formatter.dateTimeStyle = .numeric
+        return formatter.localizedString(for: date, relativeTo: now())
     }
 }

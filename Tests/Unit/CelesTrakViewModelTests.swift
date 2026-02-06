@@ -99,4 +99,72 @@ struct CelesTrakViewModelTests {
         #expect(viewModel.tles.first?.name == "From Refresh")
         #expect(viewModel.lastFetchedAt == refreshResult.fetchedAt)
     }
+
+    /// Confirms rapid repeat taps are blocked to protect the upstream API quota.
+    @Test @MainActor func refreshTLEs_withinCooldown_setsNoticeAndSkipsNetwork() async {
+        let refreshCounter = CallCounter()
+        let refreshResult = makeResult(names: ["From Refresh"], fetchedAt: Date(timeIntervalSince1970: 4_000))
+        let viewModel = CelesTrakViewModel(
+            fetchHandler: { _ in refreshResult },
+            refreshHandler: { _ in
+                await refreshCounter.increment()
+                return refreshResult
+            }
+        )
+
+        await viewModel.refreshTLEs(nameQuery: "SPACEMOBILE")
+        let firstRefreshFetchedAt = viewModel.lastFetchedAt
+        await viewModel.refreshTLEs(nameQuery: "SPACEMOBILE")
+
+        #expect(await refreshCounter.value() == 1)
+        #expect(viewModel.refreshNotice?.title == "Refresh Limited")
+        #expect(viewModel.refreshNotice?.message.contains("few times each day") == true)
+        #expect(viewModel.refreshNotice?.message.contains("automatic background refresh") == true)
+        #expect(viewModel.lastFetchedAt == firstRefreshFetchedAt)
+        #expect(viewModel.state.data == viewModel.tles)
+    }
+
+    /// Confirms a new manual refresh is allowed again once cooldown expires.
+    @Test @MainActor func refreshTLEs_afterCooldown_allowsSecondNetworkCall() async {
+        let refreshCounter = CallCounter()
+        let refreshResult = makeResult(names: ["From Refresh"], fetchedAt: Date(timeIntervalSince1970: 5_000))
+        let viewModel = CelesTrakViewModel(
+            fetchHandler: { _ in refreshResult },
+            refreshHandler: { _ in
+                await refreshCounter.increment()
+                return refreshResult
+            },
+            manualRefreshInterval: 0.01
+        )
+
+        await viewModel.refreshTLEs(nameQuery: "SPACEMOBILE")
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        await viewModel.refreshTLEs(nameQuery: "SPACEMOBILE")
+
+        #expect(await refreshCounter.value() == 2)
+        #expect(viewModel.refreshNotice == nil)
+    }
+
+    /// Confirms failed manual refresh keeps older TLE data visible to the user.
+    @Test @MainActor func refreshTLEs_onError_keepsExistingDataAndShowsNotice() async {
+        let fetchedAt = Date(timeIntervalSince1970: 6_000)
+        let fetchResult = makeResult(names: ["From Fetch"], fetchedAt: fetchedAt)
+        let viewModel = CelesTrakViewModel(
+            fetchHandler: { _ in fetchResult },
+            refreshHandler: { _ in
+                throw CelesTrakError.badStatus(503)
+            }
+        )
+
+        await viewModel.fetchTLEs(nameQuery: "SPACEMOBILE")
+        let originalTLEs = viewModel.tles
+        let originalFetchedAt = viewModel.lastFetchedAt
+        await viewModel.refreshTLEs(nameQuery: "SPACEMOBILE")
+
+        #expect(viewModel.tles == originalTLEs)
+        #expect(viewModel.state.data == originalTLEs)
+        #expect(viewModel.lastFetchedAt == originalFetchedAt)
+        #expect(viewModel.refreshNotice?.title == "Refresh Unavailable")
+        #expect(viewModel.refreshNotice?.message.contains("status code 503") == true)
+    }
 }

@@ -5,6 +5,7 @@
 //  Created by Tom Dobson on 12/20/25.
 //
 
+import Foundation
 import SwiftUI
 
 /// Displays the TLE fetch workflow with a simple status-driven layout.
@@ -56,6 +57,16 @@ struct TLEListView: View {
             // Trigger a sample query when the view appears.
             await viewModel.fetchTLEs(nameQuery: queryKey)
         }
+        .alert(
+            viewModel.refreshNotice?.title ?? "Refresh Notice",
+            isPresented: refreshNoticePresented
+        ) {
+            Button("OK", role: .cancel) {
+                viewModel.clearRefreshNotice()
+            }
+        } message: {
+            Text(viewModel.refreshNotice?.message ?? "")
+        }
     }
 
     /// Main content that switches between loading, error, and list states.
@@ -94,30 +105,57 @@ struct TLEListView: View {
 
     /// Builds a compact, space-inspired title stack with refresh timing.
     private var titleStack: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 4) {
             Text("TLEs")
                 .font(.headline.weight(.semibold))
 
             if let lastFetchedAt = viewModel.lastFetchedAt {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .symbolRenderingMode(.hierarchical)
-                    Text("Last Updated")
-                    Text(lastFetchedAt, style: .relative)
-                        .monospacedDigit()
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                refreshMetadataRow(
+                    iconName: "sparkles",
+                    label: "Last Updated",
+                    value: relativeTimeText(for: lastFetchedAt)
+                )
             } else if viewModel.state.isLoading {
                 HStack(spacing: 6) {
                     ProgressView()
                         .scaleEffect(0.7)
+                        .frame(width: 12, alignment: .center)
+                    Text("Last Updated")
+                        .frame(width: 82, alignment: .leading)
                     Text("Updating…")
+                        .monospacedDigit()
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             }
+
+            if let nextManualRefreshDate = viewModel.nextManualRefreshDate {
+                // This hint teaches users why rapid manual refresh taps are throttled.
+                refreshMetadataRow(
+                    iconName: "clock",
+                    label: "Next Refresh",
+                    value: relativeTimeText(for: nextManualRefreshDate)
+                )
+            }
         }
+    }
+
+    /// Renders one compact metadata row for title-area timing details.
+    ///
+    /// The fixed label width keeps "Last Updated" and "Next Refresh" values aligned.
+    private func refreshMetadataRow(iconName: String, label: String, value: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: iconName)
+                .symbolRenderingMode(.hierarchical)
+                .frame(width: 12, alignment: .center)
+            Text(label)
+                .frame(width: 82, alignment: .leading)
+            Text(value)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
     }
 
     /// Shared empty/error layout for non-list states.
@@ -282,6 +320,31 @@ struct TLEListView: View {
     private var isPreview: Bool {
         ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
     }
+
+    /// Bridges optional `refreshNotice` state into SwiftUI's Boolean alert API.
+    ///
+    /// This keeps alert presentation logic in the view layer while the view model
+    /// stays focused on policy decisions and user-facing message content.
+    private var refreshNoticePresented: Binding<Bool> {
+        Binding(
+            get: { viewModel.refreshNotice != nil },
+            set: { isPresented in
+                if !isPresented {
+                    viewModel.clearRefreshNotice()
+                }
+            }
+        )
+    }
+
+    /// Builds concise relative time strings so toolbar metadata stays easy to scan.
+    ///
+    /// Using short units avoids second-level churn and visual jumping.
+    private func relativeTimeText(for date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        formatter.dateTimeStyle = .numeric
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
 }
 
 /// Preview for quickly checking a successful TLE load state.
@@ -301,6 +364,29 @@ struct TLEListView: View {
 #Preview("Error") {
     TLEListView(viewModel: .previewErrorModel())
         .environment(AppNavigationState())
+}
+
+/// Preview for reviewing manual refresh alert copy and wrapping behavior.
+#Preview("Refresh Limited Alert") {
+    TLERefreshLimitedAlertPreviewHarness()
+        .environment(AppNavigationState())
+}
+
+/// Preview harness that triggers the alert after first render.
+///
+/// A delayed assignment forces a state transition, which makes alert previews
+/// reliable in cases where Xcode does not present "already true" alerts.
+private struct TLERefreshLimitedAlertPreviewHarness: View {
+    @State private var viewModel = CelesTrakViewModel.previewLoadedModel()
+
+    var body: some View {
+        TLEListView(viewModel: viewModel)
+            .task {
+                guard viewModel.refreshNotice == nil else { return }
+                await Task.yield()
+                viewModel.refreshNotice = CelesTrakViewModel.previewRefreshLimitedNotice
+            }
+    }
 }
 
 private extension CelesTrakViewModel {
@@ -334,5 +420,24 @@ private extension CelesTrakViewModel {
         let viewModel = CelesTrakViewModel()
         viewModel.state = .error("Unable to fetch TLE data right now. Please try again in a moment.")
         return viewModel
+    }
+
+    /// Shared preview alert content so preview setups stay in sync.
+    static var previewRefreshLimitedNotice: CelesTrakViewModel.RefreshNotice {
+        CelesTrakViewModel.RefreshNotice(
+            title: "Refresh Limited",
+            message: """
+            Manual refresh is available once every 15 minutes.
+
+            Why this limit exists:
+            - It protects the CelesTrak API from rate limiting.
+            - TLE sets usually update only a few times each day.
+            - The app also attempts automatic background refresh when cached data becomes stale.
+
+            Next refresh: 6:45 PM (in 14 min.).
+
+            Your current TLE set stays visible until a new refresh succeeds.
+            """
+        )
     }
 }
