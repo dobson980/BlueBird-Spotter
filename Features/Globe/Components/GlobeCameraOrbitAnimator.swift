@@ -23,7 +23,9 @@ enum GlobeCameraOrbitAnimator {
         distance: Float,
         node: SCNNode,
         maxPitchRadians: Float,
-        actionKey: String
+        actionKey: String,
+        startDirection: simd_float3? = nil,
+        startDistance: Float? = nil
     ) {
         // Clamp the target direction so camera controls remain stable near the poles.
         let clampedDirection = clampDirectionToVerticalLimits(targetDirection, maxPitch: maxPitchRadians)
@@ -32,25 +34,54 @@ enum GlobeCameraOrbitAnimator {
             return
         }
 
-        let startX = node.position.x
-        let startY = node.position.y
-        let startZ = node.position.z
-
-        // If SceneKit gives us an invalid start position, fall back to home distance.
-        let safeStartX = startX.isFinite ? startX : 0
-        let safeStartY = startY.isFinite ? startY : 0
-        let safeStartZ = startZ.isFinite ? startZ : 3.0
-
-        let startPos = simd_float3(safeStartX, safeStartY, safeStartZ)
-        let startLength = simd_length(startPos)
-        let startDirection: simd_float3
-        if startLength > 0.001 {
-            startDirection = startPos / startLength
+        let resolvedStartDirection: simd_float3
+        let resolvedStartDistance: Float
+        if let providedStartDirection = startDirection,
+           let providedStartDistance = startDistance,
+           providedStartDistance.isFinite,
+           providedStartDistance > 0.001 {
+            let normalizedStartDirection = simd_normalize(providedStartDirection)
+            if normalizedStartDirection.x.isFinite,
+               normalizedStartDirection.y.isFinite,
+               normalizedStartDirection.z.isFinite {
+                resolvedStartDirection = normalizedStartDirection
+                resolvedStartDistance = providedStartDistance
+            } else {
+                let presentationPosition = node.presentation.position
+                let startPos = simd_float3(
+                    presentationPosition.x.isFinite ? presentationPosition.x : 0,
+                    presentationPosition.y.isFinite ? presentationPosition.y : 0,
+                    presentationPosition.z.isFinite ? presentationPosition.z : 3.0
+                )
+                let startLength = simd_length(startPos)
+                if startLength > 0.001 {
+                    resolvedStartDirection = startPos / startLength
+                    resolvedStartDistance = startLength
+                } else {
+                    resolvedStartDirection = simd_float3(0, 0, 1)
+                    resolvedStartDistance = distance
+                }
+            }
         } else {
-            startDirection = simd_float3(0, 0, 1)
+            // Use presentation space as fallback so chained requests start from
+            // the camera pose currently visible on-screen.
+            let presentationPosition = node.presentation.position
+            let startPos = simd_float3(
+                presentationPosition.x.isFinite ? presentationPosition.x : 0,
+                presentationPosition.y.isFinite ? presentationPosition.y : 0,
+                presentationPosition.z.isFinite ? presentationPosition.z : 3.0
+            )
+            let startLength = simd_length(startPos)
+            if startLength > 0.001 {
+                resolvedStartDirection = startPos / startLength
+                resolvedStartDistance = startLength
+            } else {
+                resolvedStartDirection = simd_float3(0, 0, 1)
+                resolvedStartDistance = distance
+            }
         }
 
-        let dot = simd_clamp(simd_dot(startDirection, clampedDirection), -1.0, 1.0)
+        let dot = simd_clamp(simd_dot(resolvedStartDirection, clampedDirection), -1.0, 1.0)
         let angle = acos(dot)
 
         // Near-opposite directions need an intermediate waypoint to avoid path ambiguity.
@@ -58,14 +89,14 @@ enum GlobeCameraOrbitAnimator {
         let intermediateDirection: simd_float3
         if needsIntermediate {
             let yUp = simd_float3(0, 1, 0)
-            var perp = simd_cross(startDirection, yUp)
+            var perp = simd_cross(resolvedStartDirection, yUp)
             let perpLen = simd_length(perp)
             if perpLen > 0.001 {
                 perp = perp / perpLen
             } else {
                 perp = simd_float3(0, 0, 1)
             }
-            let midY = (startDirection.y + clampedDirection.y) * 0.5
+            let midY = (resolvedStartDirection.y + clampedDirection.y) * 0.5
             let horizontalScale = sqrt(max(0.01, 1.0 - midY * midY))
             intermediateDirection = simd_normalize(simd_float3(perp.x * horizontalScale, midY, perp.z * horizontalScale))
         } else {
@@ -74,28 +105,47 @@ enum GlobeCameraOrbitAnimator {
 
         node.removeAction(forKey: actionKey)
 
-        let duration: TimeInterval = needsIntermediate ? 0.6 : 0.45
+        // Two-phase focus: rotate onto the target first, then ease into target zoom.
+        // Extend duration slightly when the requested zoom delta is large so the
+        // motion reads as "pan then zoom" instead of an abrupt zoom-pop.
+        let distanceDelta = abs(distance - resolvedStartDistance)
+        let zoomDeltaDuration = min(0.55, TimeInterval(distanceDelta * 0.24))
+        let baseDuration: TimeInterval = needsIntermediate ? 1.0 : 0.8
+        let duration = baseDuration + zoomDeltaDuration
+        let rotationPhase: Float = 0.9
         let action = SCNAction.customAction(duration: duration) {
-            [startDirection, clampedDirection, intermediateDirection, needsIntermediate, distance] actionNode, time in
+            [resolvedStartDirection, clampedDirection, intermediateDirection, needsIntermediate, resolvedStartDistance, distance] actionNode, time in
             let t = Float(time / CGFloat(duration))
             let easedT = t * t * (3.0 - 2.0 * t)
 
             let interpolatedDirection: simd_float3
-            if needsIntermediate {
-                if easedT < 0.5 {
-                    let segmentT = easedT * 2.0
-                    interpolatedDirection = slerp(from: startDirection, to: intermediateDirection, t: segmentT)
+            let interpolatedDistance: Float
+            if easedT < rotationPhase {
+                // Phase 1: move around the globe at the current zoom level.
+                let rotationT = easedT / rotationPhase
+                if needsIntermediate {
+                    if rotationT < 0.5 {
+                        let segmentT = rotationT * 2.0
+                        interpolatedDirection = slerp(from: resolvedStartDirection, to: intermediateDirection, t: segmentT)
+                    } else {
+                        let segmentT = (rotationT - 0.5) * 2.0
+                        interpolatedDirection = slerp(from: intermediateDirection, to: clampedDirection, t: segmentT)
+                    }
                 } else {
-                    let segmentT = (easedT - 0.5) * 2.0
-                    interpolatedDirection = slerp(from: intermediateDirection, to: clampedDirection, t: segmentT)
+                    interpolatedDirection = slerp(from: resolvedStartDirection, to: clampedDirection, t: rotationT)
                 }
+                interpolatedDistance = resolvedStartDistance
             } else {
-                interpolatedDirection = slerp(from: startDirection, to: clampedDirection, t: easedT)
+                // Phase 2: keep target centered and zoom to selection distance.
+                let zoomT = (easedT - rotationPhase) / max(0.0001, 1.0 - rotationPhase)
+                let easedZoomT = zoomT * zoomT * (3.0 - 2.0 * zoomT)
+                interpolatedDirection = clampedDirection
+                interpolatedDistance = resolvedStartDistance + ((distance - resolvedStartDistance) * easedZoomT)
             }
 
-            let x = interpolatedDirection.x * distance
-            let y = interpolatedDirection.y * distance
-            let z = interpolatedDirection.z * distance
+            let x = interpolatedDirection.x * interpolatedDistance
+            let y = interpolatedDirection.y * interpolatedDistance
+            let z = interpolatedDirection.z * interpolatedDistance
 
             if x.isFinite, y.isFinite, z.isFinite {
                 actionNode.position = SCNVector3(x, y, z)

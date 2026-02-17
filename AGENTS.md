@@ -341,6 +341,8 @@ Prioritize tests that protect logic and prevent regressions:
 - Core domain utilities:
   - parsers
   - math helpers
+  - coverage footprint geometry estimates
+  - satellite program/category classification rules
   - caching policy decisions
 
 Avoid heavy UI snapshot testing unless already present and valuable.

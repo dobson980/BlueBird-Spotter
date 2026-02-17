@@ -148,6 +148,17 @@ struct InsideASTSView: View {
                 ForEach(InsideASTSContent.processSteps) { step in
                     processStep(title: step.title, description: step.description)
                 }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(InsideASTSContent.coverageWorkflowTitle)
+                        .font(.subheadline.weight(.semibold))
+                    Text(InsideASTSContent.coverageWorkflowNote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background { secondaryCardBackground(cornerRadius: 10) }
             }
         }
     }

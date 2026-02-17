@@ -22,6 +22,10 @@ struct GlobeView: View {
     @AppStorage("globe.orbit.thickness") private var orbitPathThickness: Double = 0.004
     /// Stores the persisted orbit path color selection.
     @AppStorage("globe.orbit.color") private var orbitPathColorId = OrbitPathColorOption.defaultId
+    /// Stores the persisted coverage footprint mode selection.
+    @AppStorage("globe.coverage.mode") private var coverageModeRaw = CoverageFootprintMode.selectedOnly.rawValue
+    /// Query keys used for live tracking in the globe tab.
+    private let queryKeys = SatelliteProgramCatalog.defaultQueryKeys
     /// A slightly longer animation keeps the glass settings panel from feeling "snappy" or jarring.
     private let settingsPanelAnimation: Animation = .smooth(duration: 0.35)
 
@@ -63,6 +67,7 @@ struct GlobeView: View {
                 isDirectionalLightEnabled: directionalLightEnabled,
                 orbitPathMode: orbitPathMode,
                 orbitPathConfig: orbitPathConfig,
+                coverageMode: coverageMode,
                 focusRequest: navigationState.focusRequest,
                 onStats: statsHandler,
                 onSelect: { viewModel.selectedSatelliteId = $0 }
@@ -130,7 +135,7 @@ struct GlobeView: View {
         .task {
             guard !isPreview else { return }
             // Starts the tracking loop when the globe becomes active.
-            viewModel.startTracking(queryKey: "SPACEMOBILE")
+            viewModel.startTracking(queryKeys: queryKeys)
         }
         .onDisappear {
             // Cancels tracking to avoid background work when the tab is hidden.
@@ -206,6 +211,19 @@ struct GlobeView: View {
         )
     }
 
+    /// Converts the persisted raw value into a user-facing coverage mode.
+    private var coverageMode: CoverageFootprintMode {
+        CoverageFootprintMode(rawValue: coverageModeRaw) ?? .selectedOnly
+    }
+
+    /// Binds the coverage mode to its persisted raw value.
+    private var coverageModeBinding: Binding<CoverageFootprintMode> {
+        Binding(
+            get: { coverageMode },
+            set: { coverageModeRaw = $0.rawValue }
+        )
+    }
+
     /// Returns the selected orbit color option, defaulting to ASTS orange.
     private var orbitPathColorOption: OrbitPathColorOption {
         OrbitPathColorOption.options.first { $0.id == orbitPathColorId } ?? OrbitPathColorOption.defaultOption
@@ -249,6 +267,23 @@ struct GlobeView: View {
                 .font(.subheadline.weight(.semibold))
 
             Toggle("Sunlight (Real-Time)", isOn: $directionalLightEnabled)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Coverage Footprints (Estimate)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("Coverage Footprints", selection: coverageModeBinding) {
+                    ForEach(CoverageFootprintMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("Educational estimate using satellite altitude and a fixed visibility threshold. Not exact live RF coverage.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Orbit Paths")

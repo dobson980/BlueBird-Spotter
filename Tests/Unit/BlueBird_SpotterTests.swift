@@ -62,6 +62,12 @@ struct BlueBird_SpotterTests {
         }
     }
 
+    /// Confirms CelesTrak's empty-match sentinel is treated as no results.
+    @Test @MainActor func parseTLEText_noGPDataFound_returnsEmpty() async throws {
+        let tles = try CelesTrakTLEClient.parseTLEText("No GP data found")
+        #expect(tles.isEmpty)
+    }
+
     /// Confirms view model sorting uses case-insensitive name ordering.
     @Test @MainActor func viewModel_sortsTLEsByName() async throws {
         let result = TLERepositoryResult(

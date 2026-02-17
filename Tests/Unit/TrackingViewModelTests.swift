@@ -246,6 +246,25 @@ struct TrackingViewModelTests {
         #expect(firstPosition != secondPosition)
     }
 
+    /// Ensures multiple query groups merge and deduplicate overlapping TLE entries.
+    @Test @MainActor func startTracking_multipleQueries_deduplicatesSatellites() async throws {
+        let ticker = ManualTicker()
+        let repository = try await makeRepository(withText: makeText(name: "BLUEWALKER 3"))
+        let viewModel = TrackingViewModel(
+            repository: repository,
+            orbitEngine: StubOrbitEngine(),
+            ticker: ticker
+        )
+
+        viewModel.startTracking(queryKeys: ["SPACEMOBILE", "BLUEWALKER 3"])
+        let tick = Date(timeIntervalSince1970: 3_500)
+        await ticker.send(tick)
+
+        let didUpdate = await waitForUpdate(matching: tick, in: viewModel)
+        #expect(didUpdate)
+        #expect(viewModel.trackedSatellites.count == 1)
+    }
+
     /// Ensures typed repository errors are surfaced with a user-friendly message.
     @Test @MainActor func startTracking_onTypedRepositoryError_setsErrorState() async throws {
         let ticker = ManualTicker()

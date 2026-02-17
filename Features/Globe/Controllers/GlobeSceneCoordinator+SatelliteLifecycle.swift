@@ -18,8 +18,14 @@ extension GlobeSceneCoordinator {
     func updateSatellites(
         _ tracked: [TrackedSatellite],
         in scene: SCNScene,
-        selectedId: Int?
+        selectedId: Int?,
+        coverageMode: CoverageFootprintMode
     ) {
+        if selectedId == nil {
+            // If selection is cleared (tap-away/settings), stop camera follow immediately.
+            disableAutoFollow()
+        }
+
         if cameraNode == nil {
             cameraNode = scene.rootNode.childNode(withName: "globeCamera", recursively: false)
         }
@@ -144,6 +150,14 @@ extension GlobeSceneCoordinator {
         if shouldUseModel {
             lastScale = renderConfig.scale
         }
+
+        updateCoverageFootprints(
+            for: tracked,
+            selectedId: selectedId,
+            mode: coverageMode,
+            in: scene,
+            animationDuration: animationDuration
+        )
 
         publishStats(trackedCount: tracked.count, shouldUseModel: shouldUseModel)
     }

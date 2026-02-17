@@ -17,8 +17,8 @@ struct TrackingView: View {
     @Environment(AppNavigationState.self) private var navigationState
     /// Tracks light/dark mode for adaptive styling.
     @Environment(\.colorScheme) private var colorScheme
-    /// Fixed query key used to drive the tracking session.
-    private let queryKey = "SPACEMOBILE"
+    /// Query keys used to drive the tracking session.
+    private let queryKeys = SatelliteProgramCatalog.defaultQueryKeys
 
     /// Allows previews to inject a prepared view model.
     init(viewModel: TrackingViewModel = TrackingViewModel()) {
@@ -39,7 +39,7 @@ struct TrackingView: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
-                            viewModel.startTracking(queryKey: queryKey)
+                            viewModel.startTracking(queryKeys: queryKeys)
                         } label: {
                             Image(systemName: "arrow.clockwise")
                         }
@@ -51,7 +51,7 @@ struct TrackingView: View {
         .task {
             guard !isPreview else { return }
             // Begin tracking when the view becomes active.
-            viewModel.startTracking(queryKey: queryKey)
+            viewModel.startTracking(queryKeys: queryKeys)
         }
         .onDisappear {
             // Stop background work when the tab is no longer visible.
@@ -68,19 +68,25 @@ struct TrackingView: View {
             case .loading:
                 emptyState(text: "Starting tracking...", showSpinner: true)
             case .loaded(let trackedSatellites):
-                // Match the TLE tab by sorting alphabetically by satellite name.
-                let sortedSatellites = sortTrackedSatellites(trackedSatellites)
+                let groupedSatellites = groupedTrackedSatellites(trackedSatellites)
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(sortedSatellites) { tracked in
-                            trackingRow(tracked)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    // Tap a row to jump to the globe and focus the satellite.
-                                    navigationState.focusOnSatellite(id: tracked.satellite.id)
-                                }
+                        ForEach(groupedSatellites) { section in
+                            sectionHeader(
+                                title: section.category.label,
+                                count: section.satellites.count
+                            )
+
+                            ForEach(section.satellites) { tracked in
+                                trackingRow(tracked)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        // Tap a row to jump to the globe and focus the satellite.
+                                        navigationState.focusOnSatellite(id: tracked.satellite.id)
+                                    }
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,7 +169,9 @@ struct TrackingView: View {
 
     /// Builds a card-style row that highlights live tracking values with equal-width chips.
     private func trackingRow(_ tracked: TrackedSatellite) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let descriptor = SatelliteProgramCatalog.descriptor(for: tracked.satellite)
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.caption)
@@ -171,8 +179,15 @@ struct TrackingView: View {
                     .padding(6)
                     .background(.thinMaterial, in: Circle())
 
-                Text(tracked.satellite.name)
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(descriptor.displayName)
+                        .font(.headline)
+                    if descriptor.displayName != tracked.satellite.name {
+                        Text(tracked.satellite.name)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             statGrid(for: tracked)
@@ -233,6 +248,22 @@ struct TrackingView: View {
         .background {
             secondaryCardBackground(cornerRadius: 10)
         }
+    }
+
+    /// Builds a compact group header for category segmentation.
+    private func sectionHeader(title: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+            Text("\(count)")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(.thinMaterial, in: Capsule())
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 4)
     }
 
     /// Full-screen space backdrop shared across tabs.
@@ -315,17 +346,37 @@ struct TrackingView: View {
         )
     }
 
-    /// Sorts tracked satellites alphabetically so the tracking list mirrors the TLE tab.
-    private func sortTrackedSatellites(_ satellites: [TrackedSatellite]) -> [TrackedSatellite] {
-        satellites.sorted { left, right in
-            left.satellite.name.localizedCaseInsensitiveCompare(right.satellite.name) == .orderedAscending
+    /// Groups tracked satellites by category for easier visual scanning.
+    private func groupedTrackedSatellites(_ satellites: [TrackedSatellite]) -> [TrackingSection] {
+        let grouped = Dictionary(grouping: satellites) { tracked in
+            SatelliteProgramCatalog.descriptor(for: tracked.satellite).category
         }
+
+        return grouped
+            .map { category, satellites in
+                TrackingSection(
+                    category: category,
+                    satellites: satellites.sorted { left, right in
+                        let leftDisplayName = SatelliteProgramCatalog.descriptor(for: left.satellite).displayName
+                        let rightDisplayName = SatelliteProgramCatalog.descriptor(for: right.satellite).displayName
+                        return leftDisplayName.localizedCaseInsensitiveCompare(rightDisplayName) == .orderedAscending
+                    }
+                )
+            }
+            .sorted { $0.category < $1.category }
     }
 
     /// Detects when the view is running in Xcode previews.
     private var isPreview: Bool {
         ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
     }
+}
+
+/// Category section model for the tracking list.
+private struct TrackingSection: Identifiable {
+    let category: SatelliteProgramCategory
+    let satellites: [TrackedSatellite]
+    var id: String { category.label }
 }
 
 /// Preview for validating tracking cards with realistic telemetry values.

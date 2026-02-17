@@ -74,6 +74,12 @@ actor CelesTrakTLEClient: CelesTrakTLEService, TLERemoteFetching {
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
+        // CelesTrak returns this plain-text sentinel when a NAME query has no matches.
+        // Treat it as an empty payload so mixed multi-query fetches can still succeed.
+        if isNoDataSentinel(rawLines) {
+            return []
+        }
+
         var results: [TLE] = []
         var i = 0
 
@@ -114,6 +120,12 @@ actor CelesTrakTLEClient: CelesTrakTLEService, TLERemoteFetching {
         }
 
         return results
+    }
+
+    /// Detects the known plain-text sentinel returned for empty NAME query matches.
+    nonisolated private static func isNoDataSentinel(_ lines: [String]) -> Bool {
+        guard lines.count == 1 else { return false }
+        return lines[0].lowercased() == "no gp data found"
     }
 
     /// Decodes JSON payloads into the existing `TLE` model.

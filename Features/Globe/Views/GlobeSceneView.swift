@@ -47,8 +47,10 @@ struct GlobeSceneView: UIViewRepresentable {
     static let satelliteCategoryMask = 1 << 0
     /// Category mask used to render orbital paths.
     static let orbitPathCategoryMask = 1 << 1
-    /// Combined mask for camera visibility (satellites + orbit paths).
-    static let sceneContentCategoryMask = satelliteCategoryMask | orbitPathCategoryMask
+    /// Category mask used for estimated satellite coverage overlays.
+    static let coverageCategoryMask = 1 << 2
+    /// Combined mask for camera visibility (satellites + paths + coverage overlays).
+    static let sceneContentCategoryMask = satelliteCategoryMask | orbitPathCategoryMask | coverageCategoryMask
     /// Maximum pitch angle used to keep the camera below the poles.
     /// Maximum camera pitch in degrees for SceneKit's camera controller.
     static let maxCameraPitchAngleDegrees: Float = 85
@@ -67,6 +69,8 @@ struct GlobeSceneView: UIViewRepresentable {
     let orbitPathMode: OrbitPathMode
     /// Rendering configuration for orbital paths.
     let orbitPathConfig: OrbitPathConfig
+    /// Controls which estimated coverage overlays are rendered.
+    let coverageMode: CoverageFootprintMode
     /// Optional focus request to center the camera on a satellite.
     let focusRequest: SatelliteFocusRequest?
     /// Optional debug hook for exposing render stats to SwiftUI overlays.
@@ -91,8 +95,12 @@ struct GlobeSceneView: UIViewRepresentable {
         view.defaultCameraController.minimumVerticalAngle = -maxPitch
         view.defaultCameraController.maximumVerticalAngle = maxPitch
         view.autoenablesDefaultLighting = false
-        // Force SceneKit to use our named camera so focus animations are visible.
-        view.pointOfView = view.scene?.rootNode.childNode(withName: "globeCamera", recursively: false)
+        // Bind both the scene POV and camera controller POV to one node so
+        // programmatic focus and gesture-driven camera movement stay in sync.
+        if let cameraNode = view.scene?.rootNode.childNode(withName: "globeCamera", recursively: false) {
+            view.pointOfView = cameraNode
+            view.defaultCameraController.pointOfView = cameraNode
+        }
 
         // Remove SceneKit's built-in double-tap so our custom reset always fires.
         view.gestureRecognizers?
@@ -113,6 +121,8 @@ struct GlobeSceneView: UIViewRepresentable {
 
         // Detect pan/pinch gestures to cancel any in-flight focus animations.
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(GlobeSceneCoordinator.handleInteraction(_:)))
+        // Restrict to single-finger drags so pinch-zoom gestures are not misclassified as pan.
+        pan.maximumNumberOfTouches = 1
         pan.delegate = context.coordinator
         view.addGestureRecognizer(pan)
 
@@ -121,8 +131,13 @@ struct GlobeSceneView: UIViewRepresentable {
         view.addGestureRecognizer(pinch)
 
         context.coordinator.view = view
+        context.coordinator.startCameraFollowDisplayLinkIfNeeded()
 
         return view
+    }
+
+    static func dismantleUIView(_ uiView: SCNView, coordinator: Coordinator) {
+        coordinator.stopCameraFollowDisplayLink()
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {
@@ -138,10 +153,12 @@ struct GlobeSceneView: UIViewRepresentable {
         context.coordinator.updateSatellites(
             trackedSatellites,
             in: scene,
-            selectedId: selectedSatelliteId
+            selectedId: selectedSatelliteId,
+            coverageMode: coverageMode
         )
         context.coordinator.updateCameraFocus(
             request: focusRequest,
+            selectedId: selectedSatelliteId,
             tracked: trackedSatellites,
             in: scene
         )
@@ -174,7 +191,7 @@ struct GlobeSceneView: UIViewRepresentable {
         let camera = SCNCamera()
         camera.zNear = 0.05
         camera.zFar = 12
-        // Render both satellites and orbit paths (camera culls by category bit mask).
+        // Render satellites, orbit paths, and coverage overlays (category bit mask culling).
         camera.categoryBitMask = Self.sceneContentCategoryMask
         let cameraNode = SCNNode()
         cameraNode.camera = camera
@@ -393,6 +410,7 @@ private struct GlobeScenePreviewShell: View {
                 // camera/light/material verification.
                 orbitPathMode: .off,
                 orbitPathConfig: .default,
+                coverageMode: .selectedOnly,
                 focusRequest: nil,
                 onStats: nil,
                 onSelect: { _ in }

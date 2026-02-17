@@ -50,6 +50,11 @@ final class GlobeViewModel {
         trackingViewModel.startTracking(queryKey: queryKey)
     }
 
+    /// Starts the underlying tracking loop using multiple query groups.
+    func startTracking(queryKeys: [String]) {
+        trackingViewModel.startTracking(queryKeys: queryKeys)
+    }
+
     /// Stops the underlying tracking loop.
     func stopTracking() {
         trackingViewModel.stopTracking()

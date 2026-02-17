@@ -158,10 +158,15 @@ final class CelesTrakViewModel {
     ///
     /// The method also sorts results alphabetically by satellite name.
     func fetchTLEs(nameQuery: String) async {
+        await fetchTLEs(nameQueries: [nameQuery])
+    }
+
+    /// Loads multiple TLE query groups and merges results into one list.
+    func fetchTLEs(nameQueries: [String]) async {
         refreshNotice = nil
         await loadTLEs(
             using: fetchHandler,
-            nameQuery: nameQuery,
+            nameQueries: nameQueries,
             clearsExistingDataOnFailure: true,
             showsRefreshFailureNotice: false
         )
@@ -169,6 +174,11 @@ final class CelesTrakViewModel {
 
     /// Triggers a foreground refresh that bypasses cache staleness checks.
     func refreshTLEs(nameQuery: String) async {
+        await refreshTLEs(nameQueries: [nameQuery])
+    }
+
+    /// Triggers a foreground refresh for multiple query groups.
+    func refreshTLEs(nameQueries: [String]) async {
         if let nextManualRefreshDate {
             refreshNotice = manualRefreshCooldownNotice(nextAllowedRefreshDate: nextManualRefreshDate)
             return
@@ -178,7 +188,7 @@ final class CelesTrakViewModel {
         recordManualRefreshAttempt(at: now())
         await loadTLEs(
             using: refreshHandler,
-            nameQuery: nameQuery,
+            nameQueries: nameQueries,
             clearsExistingDataOnFailure: false,
             showsRefreshFailureNotice: true
         )
@@ -202,16 +212,32 @@ final class CelesTrakViewModel {
     /// Shared load path for fetch and refresh actions.
     private func loadTLEs(
         using handler: @escaping @Sendable (String) async throws -> TLERepositoryResult,
-        nameQuery: String,
+        nameQueries: [String],
         clearsExistingDataOnFailure: Bool,
         showsRefreshFailureNotice: Bool
     ) async {
         guard !state.isLoading || state.error != nil else { return }
         state = .loading
+        let normalizedQueries = normalizeQueryKeys(nameQueries)
+        guard !normalizedQueries.isEmpty else {
+            handleLoadFailure(
+                message: "No TLE query keys are configured.",
+                clearsExistingDataOnFailure: clearsExistingDataOnFailure,
+                showsRefreshFailureNotice: showsRefreshFailureNotice
+            )
+            return
+        }
 
         do {
-            let result = try await handler(nameQuery)
-            tles = result.tles.sorted { lhs, rhs in
+            var partialResults: [TLERepositoryResult] = []
+            partialResults.reserveCapacity(normalizedQueries.count)
+            for query in normalizedQueries {
+                let result = try await handler(query)
+                partialResults.append(result)
+            }
+
+            let mergedResult = mergeRepositoryResults(partialResults)
+            tles = mergedResult.tles.sorted { lhs, rhs in
                 switch (lhs.name, rhs.name) {
                 case let (left?, right?):
                     return left.localizedCaseInsensitiveCompare(right) == .orderedAscending
@@ -223,8 +249,8 @@ final class CelesTrakViewModel {
                     return false
                 }
             }
-            lastFetchedAt = result.fetchedAt
-            dataAge = now().timeIntervalSince(result.fetchedAt)
+            lastFetchedAt = mergedResult.fetchedAt
+            dataAge = now().timeIntervalSince(mergedResult.fetchedAt)
             state = .loaded(tles)
         } catch let error as CelesTrakError {
             handleLoadFailure(
@@ -356,5 +382,46 @@ final class CelesTrakViewModel {
             lastManualRefreshAttemptAt = nil
             cooldownPersistence.clearLastAttempt()
         }
+    }
+
+    /// Deduplicates repeated query keys while preserving the user's input order.
+    private func normalizeQueryKeys(_ nameQueries: [String]) -> [String] {
+        var seen = Set<String>()
+        var normalized: [String] = []
+        for query in nameQueries {
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let uppercase = trimmed.uppercased()
+            if seen.insert(uppercase).inserted {
+                normalized.append(trimmed)
+            }
+        }
+        return normalized
+    }
+
+    /// Merges multiple repository results into one deduplicated payload.
+    private func mergeRepositoryResults(_ results: [TLERepositoryResult]) -> TLERepositoryResult {
+        var seenNoradIDs = Set<Int>()
+        var seenFallbackKeys = Set<String>()
+        var mergedTLEs: [TLE] = []
+        mergedTLEs.reserveCapacity(results.reduce(0) { $0 + $1.tles.count })
+
+        for result in results {
+            for tle in result.tles {
+                if let noradID = SatelliteIDParser.parseNoradId(line1: tle.line1) {
+                    guard seenNoradIDs.insert(noradID).inserted else { continue }
+                    mergedTLEs.append(tle)
+                    continue
+                }
+
+                let fallbackKey = "\(tle.line1)|\(tle.line2)"
+                guard seenFallbackKeys.insert(fallbackKey).inserted else { continue }
+                mergedTLEs.append(tle)
+            }
+        }
+
+        let latestFetchedAt = results.map(\.fetchedAt).max() ?? now()
+        let mergedSource: TLERepositoryResult.Source = results.contains(where: { $0.source == .network }) ? .network : .cache
+        return TLERepositoryResult(tles: mergedTLEs, fetchedAt: latestFetchedAt, source: mergedSource)
     }
 }
