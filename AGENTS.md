@@ -338,9 +338,16 @@ Prioritize tests that protect logic and prevent regressions:
   - derived state
   - settings/toggle behavior
   - async orchestration and cancellation
+- Globe camera state-machine decisions:
+  - selection focus transitions (pan then zoom)
+  - follow behavior with user-controlled pinch distance
+  - drag-to-deselect threshold behavior
+  - reset-home transition behavior
 - Core domain utilities:
   - parsers
   - math helpers
+  - coverage footprint geometry estimates
+  - satellite program/category classification rules
   - caching policy decisions
 
 Avoid heavy UI snapshot testing unless already present and valuable.

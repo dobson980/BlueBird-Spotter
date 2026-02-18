@@ -65,16 +65,36 @@ final class GlobeSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
     var lastOrbitPathSampleCount: Int?
     /// Latest Earth-rotation alignment applied to orbit path nodes.
     var lastOrbitRotation: simd_quatf?
-    /// Tracks the most recent camera focus request token.
-    var lastFocusToken: UUID?
+    /// Coverage overlay nodes keyed by satellite id.
+    var coverageNodes: [Int: SCNNode] = [:]
+    /// Last quantized coverage angle key used by each satellite node.
+    var coverageGeometryKeys: [Int: Int] = [:]
+    /// Shared coverage geometries cached by quantized footprint angle.
+    var coverageGeometryCache: [Int: SCNGeometry] = [:]
     /// Stores a focus request until the satellite node exists.
     var pendingFocusRequest: SatelliteFocusRequest?
+    /// Deterministic camera controller that owns focus/follow/reset state.
+    var cameraController: GlobeCameraController?
+    /// True while the user is actively panning/pinching the camera.
+    var isCameraInteractionActive = false
+    /// Tracks whether a pan gesture currently owns camera input.
+    var isPanGestureActive = false
+    /// Tracks whether a pinch gesture currently owns camera input.
+    var isPinchGestureActive = false
+    /// Last observed pan translation so drag updates can apply incremental deltas.
+    var lastPanTranslation = CGPoint.zero
+    /// Drives continuous camera follow updates between tracking ticks.
+    var cameraFollowDisplayLink: CADisplayLink?
+    /// Last timestamp observed from the display link.
+    var lastDisplayLinkTimestamp: CFTimeInterval?
+    /// Scales selection zoom relative to the home camera distance.
+    let selectionZoomMultiplier: Float = 0.7
+    /// Nominal display-link frame delta used when no timing sample exists yet.
+    let nominalFrameDelta: Float = 1.0 / 60.0
     /// Color used for selection accents.
     var selectionColor: UIColor = .systemOrange
     /// Node that highlights the selected satellite.
     var selectionIndicatorNode: SCNNode?
-    /// Action key used to replace in-flight camera focus animations.
-    let cameraFocusActionKey = "cameraFocusOrbit"
     /// Home camera position for double-tap reset (0,0 over Africa).
     let homeCameraPosition = SCNVector3(0, 0, 3)
     /// Latest tuning knobs from SwiftUI.
@@ -93,4 +113,5 @@ final class GlobeSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
         self.onStats = onStats
         self.renderConfig = config
     }
+
 }

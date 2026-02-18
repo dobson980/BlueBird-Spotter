@@ -30,6 +30,9 @@ extension GlobeSceneCoordinator {
             nodeCount: satelliteNodes.count,
             usesModelTemplates: shouldUseModel,
             templateLoaded: satelliteHighTemplateNode != nil,
+            cameraMode: cameraModeForStats,
+            cameraDistance: cameraDistanceForStats,
+            followSatelliteId: cameraFollowSatelliteIdForStats,
             isPreview: GlobeSceneView.isRunningInPreview,
             isSimulator: GlobeSceneView.isRunningInSimulator
         )
@@ -295,6 +298,11 @@ extension GlobeSceneCoordinator {
         nodeDetailTiers.removeAll()
         nodeUsesModel.removeAll()
         lastScale = nil
+        for node in coverageNodes.values {
+            node.removeFromParentNode()
+        }
+        coverageNodes.removeAll()
+        coverageGeometryKeys.removeAll()
     }
 
     /// Normalizes satellite materials for stable, opaque rendering near screen edges.

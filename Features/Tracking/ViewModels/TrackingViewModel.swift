@@ -46,20 +46,38 @@ final class TrackingViewModel {
 
     /// Starts loading TLEs and begins the 1Hz tracking loop.
     func startTracking(queryKey: String) {
+        startTracking(queryKeys: [queryKey])
+    }
+
+    /// Starts loading multiple TLE query groups and begins the 1Hz tracking loop.
+    func startTracking(queryKeys: [String]) {
         stopTracking()
         state = .loading
+        let normalizedQueryKeys = Self.normalizedQueryKeys(from: queryKeys)
+        guard !normalizedQueryKeys.isEmpty else {
+            state = .error("No tracking query keys are configured.")
+            return
+        }
 
         trackingTask = Task.detached { [weak self, repository, orbitEngine, ticker] in
             guard let self else { return }
 
             do {
-                let result = try await repository.getTLEs(queryKey: queryKey)
-                let satellites = result.tles.map { Self.makeSatellite(from: $0) }
+                var fetchedAtDates: [Date] = []
+                var combinedTLEs: [TLE] = []
+                for queryKey in normalizedQueryKeys {
+                    let result = try await repository.getTLEs(queryKey: queryKey)
+                    combinedTLEs.append(contentsOf: result.tles)
+                    fetchedAtDates.append(result.fetchedAt)
+                }
+                let mergedTLEs = Self.deduplicatedTLEs(combinedTLEs)
+                let satellites = mergedTLEs.map { Self.makeSatellite(from: $0) }
+                let latestFetchedAt = fetchedAtDates.max()
 
                 await MainActor.run {
                     self.trackedSatellites = []
                     self.lastUpdatedAt = nil
-                    self.lastTLEFetchedAt = result.fetchedAt
+                    self.lastTLEFetchedAt = latestFetchedAt
                 }
 
                 for await tick in ticker.ticks() {
@@ -137,5 +155,41 @@ final class TrackingViewModel {
         }
         let value = Int(hash % UInt64(Int.max - 1)) + 1
         return value
+    }
+
+    /// Keeps only unique query keys while preserving user-intended order.
+    nonisolated private static func normalizedQueryKeys(from queryKeys: [String]) -> [String] {
+        var seen = Set<String>()
+        var normalized: [String] = []
+        for query in queryKeys {
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let uppercased = trimmed.uppercased()
+            if seen.insert(uppercased).inserted {
+                normalized.append(trimmed)
+            }
+        }
+        return normalized
+    }
+
+    /// Removes duplicate TLE entries when multiple query buckets overlap.
+    nonisolated private static func deduplicatedTLEs(_ tles: [TLE]) -> [TLE] {
+        var seenNoradIDs = Set<Int>()
+        var seenFallbackKeys = Set<String>()
+        var deduplicated: [TLE] = []
+        deduplicated.reserveCapacity(tles.count)
+
+        for tle in tles {
+            if let noradID = parseNoradID(from: tle.line1) {
+                guard seenNoradIDs.insert(noradID).inserted else { continue }
+                deduplicated.append(tle)
+                continue
+            }
+
+            let fallbackKey = "\(tle.line1)|\(tle.line2)"
+            guard seenFallbackKeys.insert(fallbackKey).inserted else { continue }
+            deduplicated.append(tle)
+        }
+        return deduplicated
     }
 }

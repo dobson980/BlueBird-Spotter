@@ -63,6 +63,35 @@ struct CelesTrakViewModelTests {
         #expect(viewModel.dataAge != nil)
     }
 
+    /// Confirms multi-query fetch merges and deduplicates overlapping NORAD ids.
+    @Test @MainActor func fetchTLEs_multipleQueries_mergesAndDeduplicates() async {
+        let resultA = TLERepositoryResult(
+            tles: [
+                TLE(name: "SPACEMOBILE-006", line1: "1 67232U 25200A   26048.00000000  .00001000  00000-0  00000-0 0  9991", line2: "2 67232  53.0000  20.0000 0001000  90.0000 270.0000 15.20000000000001")
+            ],
+            fetchedAt: Date(timeIntervalSince1970: 2_000),
+            source: .network
+        )
+        let resultB = TLERepositoryResult(
+            tles: [
+                TLE(name: "BLUEWALKER 3", line1: "1 53807U 22111A   26048.00000000  .00001000  00000-0  00000-0 0  9991", line2: "2 53807  53.0000  20.0000 0001000  90.0000 270.0000 15.20000000000001"),
+                // Duplicate NORAD id should be removed when merging query groups.
+                TLE(name: "SPACEMOBILE-006", line1: "1 67232U 25200A   26048.00000000  .00001000  00000-0  00000-0 0  9991", line2: "2 67232  53.0000  20.0000 0001000  90.0000 270.0000 15.20000000000001")
+            ],
+            fetchedAt: Date(timeIntervalSince1970: 3_000),
+            source: .network
+        )
+        let viewModel = CelesTrakViewModel(fetchHandler: { query in
+            if query == "SPACEMOBILE" { return resultA }
+            return resultB
+        })
+
+        await viewModel.fetchTLEs(nameQueries: ["SPACEMOBILE", "BLUEWALKER 3"])
+
+        #expect(viewModel.tles.count == 2)
+        #expect(viewModel.lastFetchedAt == resultB.fetchedAt)
+    }
+
     /// Confirms duplicate fetch calls are ignored while loading is already active.
     @Test @MainActor func fetchTLEs_ignoresDuplicateWhenAlreadyLoading() async {
         let counter = CallCounter()

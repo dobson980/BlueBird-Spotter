@@ -19,8 +19,8 @@ struct TLEListView: View {
     @Environment(AppNavigationState.self) private var navigationState
     /// Tracks light/dark mode for adaptive styling.
     @Environment(\.colorScheme) private var colorScheme
-    /// Fixed query key used across the demo views.
-    private let queryKey = "SPACEMOBILE"
+    /// Query keys used across tabs, including BlueWalker 3.
+    private let queryKeys = SatelliteProgramCatalog.defaultQueryKeys
 
     /// Allows previews to inject a prepared view model.
     init(viewModel: CelesTrakViewModel = CelesTrakViewModel()) {
@@ -42,7 +42,7 @@ struct TLEListView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             Task {
-                                await viewModel.refreshTLEs(nameQuery: queryKey)
+                                await viewModel.refreshTLEs(nameQueries: queryKeys)
                             }
                         } label: {
                             Image(systemName: "arrow.clockwise")
@@ -55,7 +55,7 @@ struct TLEListView: View {
         .task {
             guard !isPreview else { return }
             // Trigger a sample query when the view appears.
-            await viewModel.fetchTLEs(nameQuery: queryKey)
+            await viewModel.fetchTLEs(nameQueries: queryKeys)
         }
         .alert(
             viewModel.refreshNotice?.title ?? "Refresh Notice",
@@ -78,17 +78,25 @@ struct TLEListView: View {
             case .loading:
                 emptyState(text: "Loading TLEs...", showSpinner: true)
             case .loaded(let tles):
+                let sections = groupedTLEs(tles)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(tles, id: \.line1) { tle in
-                            tleRow(tle)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    // Tap a row to jump to the globe and focus the satellite.
-                                    guard let id = SatelliteIDParser.parseNoradId(line1: tle.line1) else { return }
-                                    navigationState.focusOnSatellite(id: id)
-                                }
+                        ForEach(sections) { section in
+                            sectionHeader(
+                                title: section.category.label,
+                                count: section.tles.count
+                            )
+
+                            ForEach(section.tles, id: \.line1) { tle in
+                                tleRow(tle)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        // Tap a row to jump to the globe and focus the satellite.
+                                        guard let id = SatelliteIDParser.parseNoradId(line1: tle.line1) else { return }
+                                        navigationState.focusOnSatellite(id: id)
+                                    }
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -177,7 +185,9 @@ struct TLEListView: View {
 
     /// Builds a card-style row for a single TLE entry with a subtle space glow.
     private func tleRow(_ tle: TLE) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let descriptor = SatelliteProgramCatalog.descriptor(forTLEName: tle.name, line1: tle.line1)
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.caption)
@@ -185,8 +195,15 @@ struct TLEListView: View {
                     .padding(6)
                     .background(.thinMaterial, in: Circle())
 
-                Text(tle.name ?? "Unnamed satellite")
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(descriptor.displayName)
+                        .font(.headline)
+                    if let catalogName = tle.name, descriptor.displayName != catalogName {
+                        Text(catalogName)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -234,6 +251,22 @@ struct TLEListView: View {
                 .padding(.vertical, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Builds a compact group header for category segmentation.
+    private func sectionHeader(title: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+            Text("\(count)")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(.thinMaterial, in: Capsule())
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 4)
     }
 
     /// Full-screen space backdrop shared across tabs.
@@ -336,6 +369,40 @@ struct TLEListView: View {
         )
     }
 
+    /// Groups TLE entries by satellite program category for easier scanning.
+    private func groupedTLEs(_ tles: [TLE]) -> [TLESection] {
+        let grouped = Dictionary(grouping: tles) { tle in
+            SatelliteProgramCatalog.descriptor(forTLEName: tle.name, line1: tle.line1).category
+        }
+
+        return grouped
+            .map { category, entries in
+                TLESection(
+                    category: category,
+                    tles: entries.sorted(by: tleSort)
+                )
+            }
+            .sorted { $0.category < $1.category }
+    }
+
+    /// Reuses the existing name-first ordering inside each category section.
+    private func tleSort(_ lhs: TLE, _ rhs: TLE) -> Bool {
+        let leftDisplayName = SatelliteProgramCatalog.descriptor(forTLEName: lhs.name, line1: lhs.line1).displayName
+        let rightDisplayName = SatelliteProgramCatalog.descriptor(forTLEName: rhs.name, line1: rhs.line1).displayName
+        let nameOrdering = leftDisplayName.localizedCaseInsensitiveCompare(rightDisplayName)
+        if nameOrdering != .orderedSame {
+            return nameOrdering == .orderedAscending
+        }
+        return lhs.line1 < rhs.line1
+    }
+
+}
+
+/// Category section model for TLE list grouping.
+private struct TLESection: Identifiable {
+    let category: SatelliteProgramCategory
+    let tles: [TLE]
+    var id: String { category.label }
 }
 
 /// Preview for quickly checking a successful TLE load state.

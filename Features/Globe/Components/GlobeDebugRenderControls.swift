@@ -78,11 +78,29 @@ struct GlobeDebugStatsOverlay: View {
             Text("Nodes: \(renderStats?.nodeCount ?? 0)")
             Text("Template Loaded: \(renderStats?.templateLoaded == true ? "Yes" : "No")")
             Text("Uses Models: \(renderStats?.usesModelTemplates == true ? "Yes" : "No")")
+            Text("Camera Mode: \(cameraModeLabel(renderStats?.cameraMode))")
+            Text("Camera Distance: \(renderStats?.cameraDistance ?? 0, specifier: "%.2f")")
+            Text("Following: \(renderStats?.followSatelliteId.map(String.init) ?? "None")")
             Text("Simulator: \(renderStats?.isSimulator == true ? "Yes" : "No")")
         }
         .font(.caption2)
         .padding(10)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// Converts camera mode into a compact debug string.
+    private func cameraModeLabel(_ mode: GlobeCameraMode?) -> String {
+        guard let mode else { return "None" }
+        switch mode {
+        case .freeOrbit:
+            return "Free Orbit"
+        case .transitioning(let satelliteId):
+            return "Transitioning(\(satelliteId))"
+        case .following(let satelliteId):
+            return "Following(\(satelliteId))"
+        case .resettingHome:
+            return "Resetting Home"
+        }
     }
 }
 
@@ -134,6 +152,9 @@ private struct GlobeDebugRenderControlsPreviewHost: View {
             nodeCount: 5,
             usesModelTemplates: true,
             templateLoaded: true,
+            cameraMode: .following(satelliteId: 45854),
+            cameraDistance: 2.1,
+            followSatelliteId: 45854,
             isPreview: true,
             isSimulator: true
         )

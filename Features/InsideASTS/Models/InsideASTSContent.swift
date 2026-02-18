@@ -42,6 +42,12 @@ enum InsideASTSContent {
         "The strategic goal is straightforward: higher capacity, stronger service quality, and broader direct-to-device scale through partner MNOs."
     ]
 
+    /// Short title for the coverage callout inside the app-flow section.
+    static let coverageWorkflowTitle = "Coverage Circles (Estimate)"
+
+    /// Brief explanation of what coverage circles mean in the globe tab.
+    static let coverageWorkflowNote = "The globe can draw a semi-transparent footprint under each satellite to show an approximate service region. It follows the satellite in real time and uses category-based assumptions (for example, Block 1 and BlueWalker 3 footprints appear smaller than Block 2 BlueBird). This is a rough educational estimate, not operationally precise."
+
     /// Represents one high-level step in the app's data and rendering pipeline.
     struct ProcessStep: Identifiable, Hashable {
         let id = UUID()
