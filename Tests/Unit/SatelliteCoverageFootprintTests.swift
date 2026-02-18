@@ -63,4 +63,72 @@ struct SatelliteCoverageFootprintTests {
         #expect(halfAngle != nil)
         #expect(abs((halfAngle ?? 0) - 0.0785) < 0.001)
     }
+
+    /// Off-nadir scan limits should resolve to a valid positive half-angle at LEO altitudes.
+    @Test func geocentricHalfAngle_offNadirLimit_520km_isFinite() {
+        let halfAngle = SatelliteCoverageFootprint.geocentricHalfAngleRadians(
+            altitudeKm: 520,
+            maximumOffNadirDegrees: 58
+        )
+
+        #expect(halfAngle != nil)
+        #expect((halfAngle ?? 0) > 0)
+        #expect(abs((halfAngle ?? 0) - 0.1489) < 0.001)
+    }
+
+    /// A 20° profile at ~520 km should be clamped by the 58° off-nadir limit.
+    @Test func geocentricHalfAngle_elevationAndScan_20deg_520km_appliesClamp() {
+        let combined = SatelliteCoverageFootprint.geocentricHalfAngleRadians(
+            altitudeKm: 520,
+            minimumElevationDegrees: 20,
+            maximumOffNadirDegrees: 58
+        )
+        let elevationOnly = SatelliteCoverageFootprint.geocentricHalfAngleRadians(
+            altitudeKm: 520,
+            minimumElevationDegrees: 20
+        )
+        let scanOnly = SatelliteCoverageFootprint.geocentricHalfAngleRadians(
+            altitudeKm: 520,
+            maximumOffNadirDegrees: 58
+        )
+
+        #expect(combined != nil)
+        #expect(elevationOnly != nil)
+        #expect(scanOnly != nil)
+        #expect((combined ?? 0) < (elevationOnly ?? 0))
+        #expect(abs((combined ?? 0) - (scanOnly ?? 0)) < 0.000001)
+    }
+
+    /// A 25° profile at ~520 km should remain elevation-limited (not scan-limited).
+    @Test func geocentricHalfAngle_elevationAndScan_25deg_520km_staysElevationLimited() {
+        let combined = SatelliteCoverageFootprint.geocentricHalfAngleRadians(
+            altitudeKm: 520,
+            minimumElevationDegrees: 25,
+            maximumOffNadirDegrees: 58
+        )
+        let elevationOnly = SatelliteCoverageFootprint.geocentricHalfAngleRadians(
+            altitudeKm: 520,
+            minimumElevationDegrees: 25
+        )
+
+        #expect(combined != nil)
+        #expect(elevationOnly != nil)
+        #expect(abs((combined ?? 0) - (elevationOnly ?? 0)) < 0.000001)
+    }
+
+    /// With the same calibrated profile, higher altitude should still increase the coverage radius.
+    @Test func groundRadius_elevationAndScan_higherAltitude_increasesCoverage() {
+        let lowerAltitude = SatelliteCoverageFootprint.groundRadiusKm(
+            altitudeKm: 520,
+            minimumElevationDegrees: 20,
+            maximumOffNadirDegrees: 58
+        ) ?? 0
+        let higherAltitude = SatelliteCoverageFootprint.groundRadiusKm(
+            altitudeKm: 690,
+            minimumElevationDegrees: 20,
+            maximumOffNadirDegrees: 58
+        ) ?? 0
+
+        #expect(higherAltitude > lowerAltitude)
+    }
 }
