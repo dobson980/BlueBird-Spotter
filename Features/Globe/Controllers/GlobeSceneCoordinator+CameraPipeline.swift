@@ -24,8 +24,9 @@ extension GlobeSceneCoordinator {
     /// Lower follow-distance bound to keep the camera outside Earth's surface.
     private var minimumFollowDistance: Float { 1.35 }
 
-    /// Upper follow-distance bound to stay inside the configured camera far plane.
-    private var maximumFollowDistance: Float { 5.5 }
+    /// Upper follow-distance bound tuned to keep Earth framing tight during zoom-out.
+    /// This is intentionally 30% tighter than the previous 5.5 cap.
+    private var maximumFollowDistance: Float { 3.85 }
 
     /// Starts a display link that drives transition and follow interpolation.
     func startCameraFollowDisplayLinkIfNeeded() {
