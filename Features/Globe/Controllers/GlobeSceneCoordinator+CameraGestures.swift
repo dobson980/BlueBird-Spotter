@@ -64,7 +64,16 @@ extension GlobeSceneCoordinator {
             cameraController?.beginPan()
             refreshInteractionState()
         case .changed:
-            guard isPanGestureActive, !isPinchGestureActive, gesture.numberOfTouches == 1 else { return }
+            guard isPanGestureActive else { return }
+            if gesture.numberOfTouches != 1 || isPinchGestureActive {
+                // The moment a second finger is involved, release pan ownership.
+                // This avoids stale pan state preventing pinch zoom while selected.
+                lastPanTranslation = .zero
+                cameraController?.endPan()
+                isPanGestureActive = false
+                refreshInteractionState()
+                return
+            }
             let translation = gesture.translation(in: view)
             let delta = CGPoint(
                 x: translation.x - lastPanTranslation.x,
@@ -110,7 +119,18 @@ extension GlobeSceneCoordinator {
             cameraController?.beginPinch()
             refreshInteractionState()
         case .changed:
-            guard isPinchGestureActive else { return }
+            if !isPinchGestureActive {
+                // Some gesture streams can transition into pinch-changed after a pan handoff.
+                // Treat the first changed sample as a valid pinch start.
+                isPinchGestureActive = true
+                if isPanGestureActive {
+                    isPanGestureActive = false
+                    lastPanTranslation = .zero
+                    cameraController?.endPan()
+                }
+                cameraController?.beginPinch()
+                refreshInteractionState()
+            }
             cameraController?.updatePinch(scale: gesture.scale)
         case .ended, .cancelled, .failed:
             if isPinchGestureActive {
