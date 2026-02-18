@@ -262,4 +262,27 @@ struct GlobeCameraControllerTests {
         )
         #expect(secondUp.y > 0.001)
     }
+
+    /// Reattaching the same camera node should not overwrite user pinch distance.
+    @Test @MainActor func attachSameCameraNode_preservesPinchDistanceDuringFollow() {
+        let fixture = makeControllerFixture()
+        fixture.store.directions[11] = simd_normalize(simd_float3(0.45, 0.15, 0.88))
+
+        _ = fixture.controller.requestFocus(satelliteId: 11, token: UUID())
+        advanceFrames(200, for: fixture.controller)
+        #expect(fixture.controller.mode == .following(satelliteId: 11))
+
+        fixture.controller.beginPinch()
+        fixture.controller.updatePinch(scale: 0.55)
+        fixture.controller.endPinch()
+        let userDistance = fixture.controller.distance
+
+        // Coordinator may call ensure/attach repeatedly during follow ticks.
+        for _ in 0..<120 {
+            fixture.controller.attachCameraNode(fixture.cameraNode)
+            fixture.controller.tick(frameDelta: 1.0 / 60.0)
+        }
+
+        #expect(approximatelyEqual(fixture.controller.distance, userDistance, tolerance: 0.02))
+    }
 }

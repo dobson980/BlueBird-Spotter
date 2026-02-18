@@ -111,8 +111,13 @@ final class GlobeCameraController {
 
     /// Binds the managed SceneKit camera node and synchronizes initial pose.
     func attachCameraNode(_ node: SCNNode) {
-        cameraNode = node
-        syncStateFromNodePresentation(node)
+        // The state machine is the single source of truth after initial attach.
+        // Re-syncing from SceneKit every frame can reintroduce stale-pose races,
+        // especially during follow mode when display-link ticks are continuous.
+        if cameraNode !== node {
+            cameraNode = node
+            syncStateFromNodePresentation(node)
+        }
         applyCurrentPose()
     }
 
