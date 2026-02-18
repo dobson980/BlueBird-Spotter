@@ -79,6 +79,8 @@ struct GlobeView: View {
                 GlobeSelectionOverlay(trackedSatellite: selected)
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    // Keep camera gestures active while a satellite is selected.
+                    .allowsHitTesting(false)
             }
 
             settingsButton

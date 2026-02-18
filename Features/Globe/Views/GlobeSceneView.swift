@@ -20,6 +20,12 @@ struct GlobeRenderStats: Equatable {
     let usesModelTemplates: Bool
     /// Indicates whether the USDZ templates loaded successfully.
     let templateLoaded: Bool
+    /// Reports the active camera state machine mode.
+    let cameraMode: GlobeCameraMode
+    /// Reports the current camera distance from Earth center.
+    let cameraDistance: Float
+    /// Reports the currently followed satellite id, if any.
+    let followSatelliteId: Int?
     /// Reports whether the scene is running in the preview canvas.
     let isPreview: Bool
     /// Reports whether the scene is running in the simulator runtime.
@@ -85,28 +91,14 @@ struct GlobeSceneView: UIViewRepresentable {
         // Clear background so the SwiftUI space backdrop shows through.
         view.backgroundColor = UIColor.clear
         view.isOpaque = false
-        view.allowsCameraControl = true
-        view.cameraControlConfiguration.allowsTranslation = false
-        // Turntable rotation keeps "up" fixed and feels like spinning a physical globe.
-        view.defaultCameraController.interactionMode = .orbitTurntable
-        view.defaultCameraController.target = SCNVector3Zero
-        // Limit vertical rotation to prevent flipping over the poles (degrees).
-        let maxPitch = GlobeSceneView.maxCameraPitchAngleDegrees
-        view.defaultCameraController.minimumVerticalAngle = -maxPitch
-        view.defaultCameraController.maximumVerticalAngle = maxPitch
+        // Disable SceneKit's built-in camera controls so one custom state machine
+        // is the only owner of camera pose and interaction behavior.
+        view.allowsCameraControl = false
         view.autoenablesDefaultLighting = false
-        // Bind both the scene POV and camera controller POV to one node so
-        // programmatic focus and gesture-driven camera movement stay in sync.
+        // Bind the visible POV to one dedicated node managed by our camera controller.
         if let cameraNode = view.scene?.rootNode.childNode(withName: "globeCamera", recursively: false) {
             view.pointOfView = cameraNode
-            view.defaultCameraController.pointOfView = cameraNode
         }
-
-        // Remove SceneKit's built-in double-tap so our custom reset always fires.
-        view.gestureRecognizers?
-            .compactMap { $0 as? UITapGestureRecognizer }
-            .filter { $0.numberOfTapsRequired == 2 }
-            .forEach { view.removeGestureRecognizer($0) }
 
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(GlobeSceneCoordinator.handleTap(_:)))
         tap.delegate = context.coordinator
@@ -120,13 +112,17 @@ struct GlobeSceneView: UIViewRepresentable {
         tap.require(toFail: doubleTap)
 
         // Detect pan/pinch gestures to cancel any in-flight focus animations.
-        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(GlobeSceneCoordinator.handleInteraction(_:)))
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(GlobeSceneCoordinator.handlePanInteraction(_:)))
         // Restrict to single-finger drags so pinch-zoom gestures are not misclassified as pan.
         pan.maximumNumberOfTouches = 1
+        // Keep touch delivery active so pinch can start even if pan recognized first.
+        pan.cancelsTouchesInView = false
         pan.delegate = context.coordinator
         view.addGestureRecognizer(pan)
 
-        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(GlobeSceneCoordinator.handleInteraction(_:)))
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(GlobeSceneCoordinator.handlePinchInteraction(_:)))
+        // Keep touches flowing to avoid pan/pinch starvation during simultaneous gestures.
+        pinch.cancelsTouchesInView = false
         pinch.delegate = context.coordinator
         view.addGestureRecognizer(pinch)
 

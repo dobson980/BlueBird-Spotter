@@ -30,6 +30,9 @@ extension GlobeSceneCoordinator {
             nodeCount: satelliteNodes.count,
             usesModelTemplates: shouldUseModel,
             templateLoaded: satelliteHighTemplateNode != nil,
+            cameraMode: cameraModeForStats,
+            cameraDistance: cameraDistanceForStats,
+            followSatelliteId: cameraFollowSatelliteIdForStats,
             isPreview: GlobeSceneView.isRunningInPreview,
             isSimulator: GlobeSceneView.isRunningInSimulator
         )

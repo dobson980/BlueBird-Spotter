@@ -71,25 +71,18 @@ final class GlobeSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
     var coverageGeometryKeys: [Int: Int] = [:]
     /// Shared coverage geometries cached by quantized footprint angle.
     var coverageGeometryCache: [Int: SCNGeometry] = [:]
-    /// Tracks the most recent camera focus request token.
-    var lastFocusToken: UUID?
     /// Stores a focus request until the satellite node exists.
     var pendingFocusRequest: SatelliteFocusRequest?
-    /// Satellite currently being auto-followed by the camera, if any.
-    var autoFollowSatelliteId: Int?
-    /// True while the camera should keep recentering on the followed satellite.
-    var isAutoFollowEnabled = false
-    /// Last target direction used for auto-follow, to avoid redundant camera actions.
-    var lastAutoFollowDirection: simd_float3?
+    /// Deterministic camera controller that owns focus/follow/reset state.
+    var cameraController: GlobeCameraController?
     /// True while the user is actively panning/pinching the camera.
     var isCameraInteractionActive = false
-    /// Counts active gesture recognizers so follow remains paused until all touches end.
-    var activeCameraInteractionCount = 0
-    /// Defers follow camera re-acquire until the next follow tick after gestures end.
-    ///
-    /// Rebinding immediately inside gesture callbacks can race with SceneKit's
-    /// camera controller and cause visible zoom snapback.
-    var needsFollowCameraReacquire = false
+    /// Tracks whether a pan gesture currently owns camera input.
+    var isPanGestureActive = false
+    /// Tracks whether a pinch gesture currently owns camera input.
+    var isPinchGestureActive = false
+    /// Last observed pan translation so drag updates can apply incremental deltas.
+    var lastPanTranslation = CGPoint.zero
     /// Drives continuous camera follow updates between tracking ticks.
     var cameraFollowDisplayLink: CADisplayLink?
     /// Last timestamp observed from the display link.
@@ -102,8 +95,6 @@ final class GlobeSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
     var selectionColor: UIColor = .systemOrange
     /// Node that highlights the selected satellite.
     var selectionIndicatorNode: SCNNode?
-    /// Action key used to replace in-flight camera focus animations.
-    let cameraFocusActionKey = "cameraFocusOrbit"
     /// Home camera position for double-tap reset (0,0 over Africa).
     let homeCameraPosition = SCNVector3(0, 0, 3)
     /// Latest tuning knobs from SwiftUI.

@@ -47,6 +47,8 @@ enum GlobeCameraOrbitAnimator {
                 resolvedStartDirection = normalizedStartDirection
                 resolvedStartDistance = providedStartDistance
             } else {
+                // Fallback to rendered presentation space so chained requests
+                // begin from what is visibly on-screen.
                 let presentationPosition = node.presentation.position
                 let startPos = simd_float3(
                     presentationPosition.x.isFinite ? presentationPosition.x : 0,
@@ -63,7 +65,7 @@ enum GlobeCameraOrbitAnimator {
                 }
             }
         } else {
-            // Use presentation space as fallback so chained requests start from
+            // Use rendered presentation space so chained requests start from
             // the camera pose currently visible on-screen.
             let presentationPosition = node.presentation.position
             let startPos = simd_float3(

@@ -21,11 +21,6 @@ extension GlobeSceneCoordinator {
         selectedId: Int?,
         coverageMode: CoverageFootprintMode
     ) {
-        if selectedId == nil {
-            // If selection is cleared (tap-away/settings), stop camera follow immediately.
-            disableAutoFollow()
-        }
-
         if cameraNode == nil {
             cameraNode = scene.rootNode.childNode(withName: "globeCamera", recursively: false)
         }
