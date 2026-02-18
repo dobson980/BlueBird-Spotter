@@ -46,7 +46,7 @@ enum InsideASTSContent {
     static let coverageWorkflowTitle = "Coverage Circles (Estimate)"
 
     /// Brief explanation of what coverage circles mean in the globe tab.
-    static let coverageWorkflowNote = "The globe can draw a semi-transparent footprint under each satellite to show an approximate service region. It follows the satellite in real time and uses category-based assumptions (for example, Block 1 and BlueWalker 3 footprints appear smaller than Block 2 BlueBird). This is a rough educational estimate, not operationally precise."
+    static let coverageWorkflowNote = "The globe can draw a semi-transparent footprint under each satellite to show an approximate service region. It follows the satellite in real time and uses category-based assumptions with calibrated elevation masks and a lightweight scan-limit clamp (for example, Block 1 and BlueWalker 3 footprints appear smaller than Block 2 BlueBird). This is a rough educational estimate, not operationally precise."
 
     /// Represents one high-level step in the app's data and rendering pipeline.
     struct ProcessStep: Identifiable, Hashable {

@@ -47,6 +47,63 @@ enum SatelliteCoverageFootprint {
         return halfAngle
     }
 
+    /// Computes the geocentric half-angle from a maximum off-nadir scan limit.
+    ///
+    /// Why this exists:
+    /// - Some public AST materials describe a boresight/off-nadir service limit.
+    /// - This gives a lightweight way to bound the footprint without RF simulation.
+    nonisolated static func geocentricHalfAngleRadians(
+        altitudeKm: Double,
+        maximumOffNadirDegrees: Double,
+        earthRadiusKm: Double = GlobeCoordinateConverter.earthRadiusKm
+    ) -> Double? {
+        guard earthRadiusKm > 0 else { return nil }
+        let orbitalRadiusKm = earthRadiusKm + altitudeKm
+        guard orbitalRadiusKm > earthRadiusKm else { return nil }
+
+        let offNadirRadians = maximumOffNadirDegrees * .pi / 180
+        let sineArgument = (orbitalRadiusKm / earthRadiusKm) * sin(offNadirRadians)
+        // Clamp so slight floating-point drift cannot push asin outside [-1, 1].
+        let clampedSine = min(max(sineArgument, -1), 1)
+        let halfAngle = asin(clampedSine) - offNadirRadians
+
+        guard halfAngle.isFinite, halfAngle > 0 else { return nil }
+        return halfAngle
+    }
+
+    /// Computes the geocentric half-angle from elevation, then applies an optional scan clamp.
+    ///
+    /// The returned value is:
+    /// - elevation-only when no scan limit is provided, or
+    /// - `min(elevationLimited, scanLimited)` when both are valid.
+    nonisolated static func geocentricHalfAngleRadians(
+        altitudeKm: Double,
+        minimumElevationDegrees: Double = defaultMinimumElevationDegrees,
+        maximumOffNadirDegrees: Double?,
+        earthRadiusKm: Double = GlobeCoordinateConverter.earthRadiusKm
+    ) -> Double? {
+        guard let elevationLimited = geocentricHalfAngleRadians(
+            altitudeKm: altitudeKm,
+            minimumElevationDegrees: minimumElevationDegrees,
+            earthRadiusKm: earthRadiusKm
+        ) else {
+            return nil
+        }
+
+        guard let maximumOffNadirDegrees else {
+            return elevationLimited
+        }
+        guard let scanLimited = geocentricHalfAngleRadians(
+            altitudeKm: altitudeKm,
+            maximumOffNadirDegrees: maximumOffNadirDegrees,
+            earthRadiusKm: earthRadiusKm
+        ) else {
+            // Invalid scan input should fall back to the elevation-only footprint.
+            return elevationLimited
+        }
+        return min(elevationLimited, scanLimited)
+    }
+
     /// Returns the estimated ground radius (great-circle distance) in kilometers.
     nonisolated static func groundRadiusKm(
         altitudeKm: Double,
@@ -56,6 +113,25 @@ enum SatelliteCoverageFootprint {
         guard let halfAngle = geocentricHalfAngleRadians(
             altitudeKm: altitudeKm,
             minimumElevationDegrees: minimumElevationDegrees,
+            earthRadiusKm: earthRadiusKm
+        ) else {
+            return nil
+        }
+
+        return earthRadiusKm * halfAngle
+    }
+
+    /// Returns the estimated ground radius with an optional off-nadir scan clamp.
+    nonisolated static func groundRadiusKm(
+        altitudeKm: Double,
+        minimumElevationDegrees: Double = defaultMinimumElevationDegrees,
+        maximumOffNadirDegrees: Double?,
+        earthRadiusKm: Double = GlobeCoordinateConverter.earthRadiusKm
+    ) -> Double? {
+        guard let halfAngle = geocentricHalfAngleRadians(
+            altitudeKm: altitudeKm,
+            minimumElevationDegrees: minimumElevationDegrees,
+            maximumOffNadirDegrees: maximumOffNadirDegrees,
             earthRadiusKm: earthRadiusKm
         ) else {
             return nil

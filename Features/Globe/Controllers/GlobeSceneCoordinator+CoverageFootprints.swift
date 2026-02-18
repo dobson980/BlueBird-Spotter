@@ -272,6 +272,12 @@ extension GlobeSceneCoordinator {
                 altitudeKm: trackedSatellite.position.altitudeKm,
                 minimumElevationDegrees: minimumElevationDegrees
             )
+        case .minimumElevationWithScanLimit(let minimumElevationDegrees, let maxOffNadirDegrees):
+            return SatelliteCoverageFootprint.geocentricHalfAngleRadians(
+                altitudeKm: trackedSatellite.position.altitudeKm,
+                minimumElevationDegrees: minimumElevationDegrees,
+                maximumOffNadirDegrees: maxOffNadirDegrees
+            )
         case .fixedGroundRadiusKm(let groundRadiusKm):
             return SatelliteCoverageFootprint.geocentricHalfAngleRadians(
                 groundRadiusKm: groundRadiusKm

@@ -58,6 +58,8 @@ enum SatelliteProgramCategory: Hashable, Sendable, Comparable {
 enum SatelliteCoverageEstimateModel: Sendable, Equatable {
     /// Uses geometry with a minimum elevation threshold.
     case minimumElevationDegrees(Double)
+    /// Uses minimum-elevation geometry with an additional off-nadir scan clamp.
+    case minimumElevationWithScanLimit(minimumElevationDegrees: Double, maxOffNadirDegrees: Double)
     /// Uses a fixed effective ground-radius estimate.
     case fixedGroundRadiusKm(Double)
 }
@@ -91,6 +93,8 @@ enum SatelliteProgramCatalog {
 
     /// Known NORAD id for BlueWalker 3.
     nonisolated private static let blueWalkerNoradIDs: Set<Int> = [53_807]
+    /// Lightweight scan clamp used for BlueBird educational footprint limits.
+    nonisolated private static let blueBirdMaxOffNadirDegrees: Double = 58
 
     /// Known BlueBird serial number by NORAD id.
     ///
@@ -147,6 +151,12 @@ enum SatelliteProgramCatalog {
             return SatelliteCoverageFootprint.groundRadiusKm(
                 altitudeKm: altitudeKm,
                 minimumElevationDegrees: minimumElevation
+            )
+        case .minimumElevationWithScanLimit(let minimumElevation, let maxOffNadir):
+            return SatelliteCoverageFootprint.groundRadiusKm(
+                altitudeKm: altitudeKm,
+                minimumElevationDegrees: minimumElevation,
+                maximumOffNadirDegrees: maxOffNadir
             )
         }
     }
@@ -232,8 +242,8 @@ enum SatelliteProgramCatalog {
 
     /// Coverage assumptions by category.
     ///
-    /// - Block 2 uses the 20° minimum-elevation geometry baseline.
-    /// - Block 1 uses a tighter (35°) mask as a conservative smaller-footprint estimate.
+    /// - Block 2+ uses a 20° minimum elevation plus a 58° off-nadir scan clamp.
+    /// - Block 1 uses a slightly more conservative 25° minimum elevation with the same clamp.
     /// - BlueWalker 3 uses the public ~300,000 sq mi FoV figure (~500 km effective radius).
     nonisolated private static func resolveCoverageEstimateModel(
         category: SatelliteProgramCategory
@@ -243,9 +253,15 @@ enum SatelliteProgramCatalog {
             return .fixedGroundRadiusKm(500)
         case .blueBirdBlock(let blockNumber):
             if blockNumber == 1 {
-                return .minimumElevationDegrees(35)
+                return .minimumElevationWithScanLimit(
+                    minimumElevationDegrees: 25,
+                    maxOffNadirDegrees: blueBirdMaxOffNadirDegrees
+                )
             }
-            return .minimumElevationDegrees(20)
+            return .minimumElevationWithScanLimit(
+                minimumElevationDegrees: 20,
+                maxOffNadirDegrees: blueBirdMaxOffNadirDegrees
+            )
         case .unknown:
             return .minimumElevationDegrees(25)
         }

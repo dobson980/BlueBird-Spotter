@@ -282,7 +282,7 @@ struct GlobeView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Text("Educational estimate using satellite altitude and a fixed visibility threshold. Not exact live RF coverage.")
+                Text("Educational estimate using satellite altitude, calibrated elevation masks, and a scan-limit clamp. Not exact live RF coverage.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
