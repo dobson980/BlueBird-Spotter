@@ -16,6 +16,8 @@ struct GlobeView: View {
     @Environment(AppNavigationState.self) private var navigationState
     /// Stores the persisted directional light toggle.
     @AppStorage("globe.light.directional.enabled") private var directionalLightEnabled = true
+    /// Stores the persisted app-wide appearance preference.
+    @AppStorage("app.appearance.mode") private var appAppearanceModeRaw = AppAppearanceMode.system.rawValue
     /// Stores the persisted orbit path mode selection.
     @AppStorage("globe.orbit.mode") private var orbitPathModeRaw = OrbitPathMode.selectedOnly.rawValue
     /// Stores the persisted orbit path thickness for the ribbon.
@@ -226,6 +228,19 @@ struct GlobeView: View {
         )
     }
 
+    /// Converts persisted raw storage into a safe app appearance enum.
+    private var appAppearanceMode: AppAppearanceMode {
+        AppAppearanceMode(rawValue: appAppearanceModeRaw) ?? .system
+    }
+
+    /// Binds app appearance mode selection to persisted raw storage.
+    private var appAppearanceModeBinding: Binding<AppAppearanceMode> {
+        Binding(
+            get: { appAppearanceMode },
+            set: { appAppearanceModeRaw = $0.rawValue }
+        )
+    }
+
     /// Returns the selected orbit color option, defaulting to ASTS orange.
     private var orbitPathColorOption: OrbitPathColorOption {
         OrbitPathColorOption.options.first { $0.id == orbitPathColorId } ?? OrbitPathColorOption.defaultOption
@@ -265,6 +280,7 @@ struct GlobeView: View {
     /// Presents a compact settings card with globe-specific toggles.
     private var settingsPanel: some View {
         GlobeSettingsPanel(
+            appAppearanceMode: appAppearanceModeBinding,
             directionalLightEnabled: $directionalLightEnabled,
             coverageMode: coverageModeBinding,
             orbitPathMode: orbitPathModeBinding,

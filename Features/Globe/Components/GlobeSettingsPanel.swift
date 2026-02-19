@@ -17,6 +17,7 @@ import SwiftUI
 /// - It does not own persistence policy; it only edits values exposed through bindings.
 /// - It does not coordinate tracking or camera behavior.
 struct GlobeSettingsPanel: View {
+    @Binding var appAppearanceMode: AppAppearanceMode
     @Binding var directionalLightEnabled: Bool
     @Binding var coverageMode: CoverageFootprintMode
     @Binding var orbitPathMode: OrbitPathMode
@@ -90,6 +91,19 @@ struct GlobeSettingsPanel: View {
     /// Main settings controls keep existing behavior while upgrading visual hierarchy.
     private var sectionsContent: some View {
         VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+            sectionCard(
+                icon: "circle.lefthalf.filled",
+                title: "Appearance",
+                tint: Color(red: 0.46, green: 0.73, blue: 0.96)
+            ) {
+                Picker("Appearance", selection: $appAppearanceMode) {
+                    ForEach(AppAppearanceMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
             sectionCard(
                 icon: "sun.max",
                 title: "Lighting",
