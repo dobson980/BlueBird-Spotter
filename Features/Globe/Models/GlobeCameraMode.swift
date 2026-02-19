@@ -2,7 +2,7 @@
 //  GlobeCameraMode.swift
 //  BlueBird Spotter
 //
-//  Created by Codex on 2/18/26.
+//  Created by Tom Dobson on 2/18/26.
 //
 
 /// High-level camera modes used by the globe camera state machine.

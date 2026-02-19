@@ -2,7 +2,7 @@
 //  BlueBirdHUDStyle.swift
 //  BlueBird Spotter
 //
-//  Created by Codex on 2/18/26.
+//  Created by Tom Dobson on 2/18/26.
 //
 
 import SwiftUI

@@ -2,7 +2,7 @@
 //  SatelliteCoverageFootprintTests.swift
 //  BlueBird SpotterTests
 //
-//  Created by Codex on 2/17/26.
+//  Created by Tom Dobson on 2/17/26.
 //
 
 import Testing

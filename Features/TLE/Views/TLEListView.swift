@@ -182,73 +182,6 @@ struct TLEListView: View {
         .padding(.horizontal, 16)
     }
 
-    /// Builds a card-style row for a single TLE entry with a subtle space glow.
-    private func tleRow(_ tle: TLE) -> some View {
-        let descriptor = SatelliteProgramCatalog.descriptor(forTLEName: tle.name, line1: tle.line1)
-        let noradID = SatelliteIDParser.parseNoradId(line1: tle.line1)
-
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.95))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(descriptor.displayName)
-                        .font(.system(.body, design: .rounded).weight(.semibold))
-                        .foregroundStyle(.white)
-
-                    if let catalogName = tle.name, descriptor.displayName != catalogName {
-                        Text(catalogName)
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.82))
-                    }
-                }
-
-                Spacer(minLength: 0)
-
-                if let noradID {
-                    capsuleChip(icon: "number", text: "\(noradID)")
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(BlueBirdHUDStyle.headerGradient)
-
-            Divider()
-                .overlay(.white.opacity(colorScheme == .dark ? 0.14 : 0.22))
-
-            VStack(alignment: .leading, spacing: 6) {
-                VStack(alignment: .leading, spacing: 6) {
-                    tleLine(tle.line1)
-                    tleLine(tle.line2)
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .blueBirdHUDInset(cornerRadius: 10)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .blueBirdHUDCard(cornerRadius: 16, tint: Color(red: 0.04, green: 0.61, blue: 0.86))
-    }
-
-    /// Keeps fixed-width TLE strings readable without forcing the card wider than the screen.
-    private func tleLine(_ line: String) -> some View {
-        // Horizontal scrolling lets the full TLE line stay accessible without overflowing.
-        ScrollView(.horizontal, showsIndicators: false) {
-            Text(line)
-                .font(.caption2)
-                .monospaced()
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .textSelection(.enabled)
-                .padding(.vertical, 2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     /// Builds a collapsible section header that matches the shared HUD label style.
     private func sectionHeader(
         title: String,
@@ -264,21 +197,6 @@ struct TLEListView: View {
         )
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 2)
-    }
-
-    /// Capsule badge used in row-header metadata.
-    private func capsuleChip(icon: String, text: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.caption2.weight(.semibold))
-            Text(text)
-                .font(.caption2.weight(.semibold))
-                .lineLimit(1)
-        }
-        .foregroundStyle(.white.opacity(0.95))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(.white.opacity(0.16), in: Capsule())
     }
 
     /// Reusable section renderer so list composition can opt into `GlassEffectContainer`.
@@ -299,7 +217,7 @@ struct TLEListView: View {
                 if !isCollapsed {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(section.tles, id: \.line1) { tle in
-                            tleRow(tle)
+                            TLESatelliteCard(tle: tle)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
@@ -387,13 +305,6 @@ struct TLEListView: View {
         return lhs.line1 < rhs.line1
     }
 
-}
-
-/// Category section model for TLE list grouping.
-private struct TLESection: Identifiable {
-    let category: SatelliteProgramCategory
-    let tles: [TLE]
-    var id: String { category.label }
 }
 
 /// Preview for quickly checking a successful TLE load state.
