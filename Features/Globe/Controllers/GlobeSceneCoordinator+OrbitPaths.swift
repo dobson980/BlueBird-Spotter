@@ -56,15 +56,21 @@ extension GlobeSceneCoordinator {
             lastOrbitPathSampleCount = effectiveSampleCount
         }
 
-        removeOrbitPaths(excluding: desiredSignatures)
-        buildMissingOrbitPaths(
-            desired: desiredSignatures,
-            representative: representative,
-            config: config,
+        desiredOrbitPathSignatures = desiredSignatures
+        orbitPathBuildContext = OrbitPathBuildContext(
             referenceDate: referenceDate,
             sampleCount: effectiveSampleCount,
-            priority: mode == .all ? .utility : .userInitiated
+            altitudeOffsetKm: config.altitudeOffsetKm,
+            priority: mode == .all ? .utility : .userInitiated,
+            generation: orbitPathBuildGeneration
         )
+
+        removeOrbitPaths(excluding: desiredSignatures)
+        enqueueMissingOrbitPathBuilds(
+            desired: desiredSignatures,
+            representative: representative
+        )
+        drainOrbitPathBuildQueueIfNeeded()
     }
 
     /// Removes all cached orbit paths and cancels in-flight builds.
@@ -77,6 +83,12 @@ extension GlobeSceneCoordinator {
             task.cancel()
         }
         orbitPathTasks.removeAll()
+        orbitPathBuildQueue.removeAll()
+        queuedOrbitPathSignatures.removeAll()
+        desiredOrbitPathSignatures.removeAll()
+        orbitPathBuildContext = nil
+        // Any completion from pre-clear tasks should be ignored.
+        orbitPathBuildGeneration &+= 1
     }
 
     /// Builds a map of satellite ids to their deduped orbit signatures.
@@ -115,60 +127,113 @@ extension GlobeSceneCoordinator {
             task.cancel()
             orbitPathTasks[signature] = nil
         }
+
+        guard !orbitPathBuildQueue.isEmpty else { return }
+
+        var trimmedQueue: [OrbitPathBuildRequest] = []
+        trimmedQueue.reserveCapacity(orbitPathBuildQueue.count)
+        for request in orbitPathBuildQueue where desired.contains(request.signature) {
+            trimmedQueue.append(request)
+        }
+        orbitPathBuildQueue = trimmedQueue
+        queuedOrbitPathSignatures = Set(trimmedQueue.map { $0.signature })
     }
 
-    /// Builds missing orbital paths asynchronously for the requested signatures.
-    private func buildMissingOrbitPaths(
+    /// Adds missing orbit signatures to the pending background-build queue.
+    private func enqueueMissingOrbitPathBuilds(
         desired: Set<OrbitSignature>,
-        representative: [OrbitSignature: Satellite],
-        config: OrbitPathConfig,
-        referenceDate: Date,
-        sampleCount: Int,
-        priority: TaskPriority
+        representative: [OrbitSignature: Satellite]
     ) {
-        let altitudeOffsetKm = config.altitudeOffsetKm
-
         for signature in desired {
-            if orbitPathTasks.count >= Self.maxConcurrentOrbitPathBuilds {
-                break
-            }
             guard orbitPathNodes[signature] == nil,
                   orbitPathTasks[signature] == nil,
+                  !queuedOrbitPathSignatures.contains(signature),
                   let satellite = representative[signature] else { continue }
 
-            let task = Task.detached(priority: priority) {
-                return GlobeOrbitPathBuilder.buildOrbitPathVertices(
-                    for: satellite,
-                    referenceDate: referenceDate,
-                    sampleCount: sampleCount,
-                    altitudeOffsetKm: altitudeOffsetKm
+            orbitPathBuildQueue.append(
+                OrbitPathBuildRequest(
+                    signature: signature,
+                    satellite: satellite
                 )
+            )
+            queuedOrbitPathSignatures.insert(signature)
+        }
+    }
+
+    /// Starts queued orbit builds up to the configured concurrency cap.
+    private func drainOrbitPathBuildQueueIfNeeded() {
+        guard let context = orbitPathBuildContext else { return }
+
+        while orbitPathTasks.count < Self.maxConcurrentOrbitPathBuilds,
+              let request = popNextOrbitPathBuildRequest() {
+            guard orbitPathNodes[request.signature] == nil,
+                  orbitPathTasks[request.signature] == nil,
+                  desiredOrbitPathSignatures.contains(request.signature) else {
+                continue
             }
 
-            orbitPathTasks[signature] = task
+            launchOrbitPathBuild(for: request, context: context)
+        }
+    }
 
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let vertices = await task.value
-                self.orbitPathTasks[signature] = nil
+    /// Pops the next queued orbit build request while keeping de-dupe bookkeeping in sync.
+    private func popNextOrbitPathBuildRequest() -> OrbitPathBuildRequest? {
+        guard !orbitPathBuildQueue.isEmpty else { return nil }
+        let request = orbitPathBuildQueue.removeFirst()
+        queuedOrbitPathSignatures.remove(request.signature)
+        return request
+    }
 
-                guard !Task.isCancelled,
-                      self.orbitPathNodes[signature] == nil,
-                      desired.contains(signature),
-                      vertices.count > 1 else { return }
+    /// Launches one detached build task and handles completion on the main actor.
+    private func launchOrbitPathBuild(for request: OrbitPathBuildRequest, context: OrbitPathBuildContext) {
+        let signature = request.signature
+        let satellite = request.satellite
 
-                guard let config = self.lastOrbitPathConfig else { return }
-                let node = GlobeOrbitPathBuilder.makeOrbitPathNode(
-                    vertices: vertices,
-                    config: config,
-                    categoryMask: self.orbitPathCategoryMask
-                )
-                if let rotation = self.lastOrbitRotation {
-                    node.simdOrientation = rotation
-                }
-                self.view?.scene?.rootNode.addChildNode(node)
-                self.orbitPathNodes[signature] = node
+        // Detached work avoids inheriting main-actor context for heavy orbit math.
+        let task = Task.detached(priority: context.priority) {
+            GlobeOrbitPathBuilder.buildOrbitPathVertices(
+                for: satellite,
+                referenceDate: context.referenceDate,
+                sampleCount: context.sampleCount,
+                altitudeOffsetKm: context.altitudeOffsetKm
+            )
+        }
+
+        orbitPathTasks[signature] = task
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let vertices = await task.value
+            self.orbitPathTasks[signature] = nil
+
+            defer {
+                // Continue draining immediately so we are not gated by the next SwiftUI tick.
+                self.drainOrbitPathBuildQueueIfNeeded()
             }
+
+            guard context.generation == self.orbitPathBuildGeneration,
+                  self.orbitPathNodes[signature] == nil,
+                  self.desiredOrbitPathSignatures.contains(signature),
+                  vertices.count > 1 else { return }
+
+            guard let config = self.lastOrbitPathConfig else { return }
+            let node = GlobeOrbitPathBuilder.makeOrbitPathNode(
+                vertices: vertices,
+                config: config,
+                categoryMask: self.orbitPathCategoryMask
+            )
+            if let rotation = self.lastOrbitRotation {
+                node.simdOrientation = rotation
+            }
+            // Start transparent, then fade in to remove hard pop-in of completed paths.
+            node.opacity = 0
+            self.view?.scene?.rootNode.addChildNode(node)
+            self.orbitPathNodes[signature] = node
+
+            SCNTransaction.begin()
+            SCNTransaction.animationDuration = Self.orbitPathFadeInDuration
+            node.opacity = 1
+            SCNTransaction.commit()
         }
     }
 
