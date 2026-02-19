@@ -12,116 +12,13 @@ import Testing
 /// Unit tests for cache freshness and fallback behavior in the repository.
 struct TLERepositoryTests {
 
-    private enum MockError: Error {
-        case failed
-    }
-
-    /// Minimal service stub for controlling success and failure paths.
-    private actor MockService: CelesTrakTLEService {
-        private(set) var callCount = 0
-        var response: TLEFetchResult?
-        var error: Error?
-        var delayNanoseconds: UInt64 = 0
-
-        func fetchTLEText(nameQuery: String, cacheMetadata: TLECacheMetadata?) async throws -> TLEFetchResult {
-            callCount += 1
-            if delayNanoseconds > 0 {
-                try await Task.sleep(nanoseconds: delayNanoseconds)
-            }
-            if let error {
-                throw error
-            }
-            return response!
-        }
-
-        func fetchTLEs(nameQuery: String) async throws -> [TLE] {
-            let result = try await fetchTLEText(nameQuery: nameQuery, cacheMetadata: nil)
-            guard case let .payload(response) = result else {
-                throw CelesTrakError.notModified
-            }
-            // Use a main-actor hop to access default-isolated response values in tests.
-            let payload = await MainActor.run { response.payload }
-            let contentType = await MainActor.run { response.contentType }
-            let parsed: [TLE]
-            if contentType.hasPrefix("application/json") {
-                parsed = try CelesTrakTLEClient.decodeJSONPayload(payload)
-            } else {
-                let text = String(decoding: payload, as: UTF8.self)
-                parsed = try Self.parseTLEText(text)
-            }
-            return TLEFilter.excludeDebris(from: parsed)
-        }
-
-        nonisolated static func parseTLEText(_ text: String) throws -> [TLE] {
-            try CelesTrakTLEClient.parseTLEText(text)
-        }
-
-        func getCallCount() -> Int {
-            callCount
-        }
-
-        func setResponse(_ response: TLEFetchResult?) {
-            self.response = response
-        }
-
-        func setError(_ error: Error?) {
-            self.error = error
-        }
-
-        func setDelayNanoseconds(_ value: UInt64) {
-            delayNanoseconds = value
-        }
-    }
-
-    /// Mutable clock helper so tests can move "current time" forward.
-    ///
-    /// The repository's `clock` dependency is synchronous, so this helper uses
-    /// an explicit lock to provide thread-safe reads and writes across tasks.
-    private final class MutableClock: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value: Date
-
-        init(_ value: Date) {
-            self.value = value
-        }
-
-        func now() -> Date {
-            lock.lock()
-            defer { lock.unlock() }
-            return value
-        }
-
-        func set(_ value: Date) {
-            lock.lock()
-            self.value = value
-            lock.unlock()
-        }
-    }
-
-    /// Creates a unique temp directory for isolated cache files.
-    private func makeTempDirectory() throws -> URL {
-        let base = FileManager.default.temporaryDirectory
-        let dir = base.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    /// Generates a small, valid 3-line TLE block for tests.
-    private func makeText(name: String) -> String {
-        """
-        \(name)
-        1 00001U 98067A   20344.12345678  .00001234  00000-0  10270-3 0  9991
-        2 00001  51.6431  21.2862 0007417  92.3844  10.1234 15.48912345123456
-        """
-    }
-
     /// Uses cache when data is fresh and avoids a network call.
     @Test @MainActor func repository_usesFreshCacheWithoutNetwork() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
         let cacheStore = TLECacheStore(directory: cacheDirectory)
         let policy = TLECachePolicy(staleAfter: 6 * 60 * 60)
-        let text = makeText(name: "ALPHA")
+        let text = TLERepositoryTestSupport.makeText(name: "ALPHA")
         let sourceURL = URL(string: "https://example.com/cache")!
 
         try await cacheStore.save(
@@ -132,11 +29,11 @@ struct TLERepositoryTests {
             contentType: "text/tle"
         )
 
-        let service = MockService()
+        let service = TLERepositoryTestSupport.MockService()
         await service.setResponse(
             .payload(
                 TLEFetchResponse(
-                    payload: Data(makeText(name: "REMOTE").utf8),
+                    payload: Data(TLERepositoryTestSupport.makeText(name: "REMOTE").utf8),
                     contentType: "text/tle",
                     sourceURL: URL(string: "https://example.com/remote")!,
                     etag: nil,
@@ -162,24 +59,24 @@ struct TLERepositoryTests {
     /// Refreshes from the network when cache is stale.
     @Test @MainActor func repository_refreshesWhenCacheIsStale() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
         let cacheStore = TLECacheStore(directory: cacheDirectory)
         let policy = TLECachePolicy(staleAfter: 6 * 60 * 60)
         let sourceURL = URL(string: "https://example.com/cache")!
 
         try await cacheStore.save(
             queryKey: "SPACEMOBILE",
-            payload: Data(makeText(name: "OLD").utf8),
+            payload: Data(TLERepositoryTestSupport.makeText(name: "OLD").utf8),
             sourceURL: sourceURL,
             fetchedAt: now.addingTimeInterval(-7 * 60 * 60),
             contentType: "text/tle"
         )
 
-        let service = MockService()
+        let service = TLERepositoryTestSupport.MockService()
         await service.setResponse(
             .payload(
                 TLEFetchResponse(
-                    payload: Data(makeText(name: "NEW").utf8),
+                    payload: Data(TLERepositoryTestSupport.makeText(name: "NEW").utf8),
                     contentType: "text/tle",
                     sourceURL: URL(string: "https://example.com/remote")!,
                     etag: nil,
@@ -207,21 +104,21 @@ struct TLERepositoryTests {
     /// Falls back to cached data if the refresh fails.
     @Test @MainActor func repository_fallsBackToCacheOnNetworkFailure() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
         let cacheStore = TLECacheStore(directory: cacheDirectory)
         let policy = TLECachePolicy(staleAfter: 6 * 60 * 60)
         let sourceURL = URL(string: "https://example.com/cache")!
 
         try await cacheStore.save(
             queryKey: "SPACEMOBILE",
-            payload: Data(makeText(name: "CACHED").utf8),
+            payload: Data(TLERepositoryTestSupport.makeText(name: "CACHED").utf8),
             sourceURL: sourceURL,
             fetchedAt: now.addingTimeInterval(-7 * 60 * 60),
             contentType: "text/tle"
         )
 
-        let service = MockService()
-        await service.setError(MockError.failed)
+        let service = TLERepositoryTestSupport.MockService()
+        await service.setError(TLERepositoryTestSupport.MockError.failed)
 
         let repository = TLERepository(
             service: service,
@@ -240,14 +137,14 @@ struct TLERepositoryTests {
     /// Saves and returns data when no cache exists but the network succeeds.
     @Test @MainActor func repository_fetchesWhenCacheMissing() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
         let cacheStore = TLECacheStore(directory: cacheDirectory)
         let policy = TLECachePolicy(staleAfter: 6 * 60 * 60)
-        let service = MockService()
+        let service = TLERepositoryTestSupport.MockService()
         await service.setResponse(
             .payload(
                 TLEFetchResponse(
-                    payload: Data(makeText(name: "NEW").utf8),
+                    payload: Data(TLERepositoryTestSupport.makeText(name: "NEW").utf8),
                     contentType: "text/tle",
                     sourceURL: URL(string: "https://example.com/remote")!,
                     etag: nil,
@@ -275,11 +172,11 @@ struct TLERepositoryTests {
     /// Throws when both network and cache are unavailable.
     @Test @MainActor func repository_throwsWhenNoCacheAndNetworkFails() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
         let cacheStore = TLECacheStore(directory: cacheDirectory)
         let policy = TLECachePolicy(staleAfter: 6 * 60 * 60)
-        let service = MockService()
-        await service.setError(MockError.failed)
+        let service = TLERepositoryTestSupport.MockService()
+        await service.setError(TLERepositoryTestSupport.MockError.failed)
 
         let repository = TLERepository(
             service: service,
@@ -292,21 +189,21 @@ struct TLERepositoryTests {
             _ = try await repository.getTLEs(queryKey: "SPACEMOBILE")
             #expect(Bool(false))
         } catch {
-            #expect(error is MockError)
+            #expect(error is TLERepositoryTestSupport.MockError)
         }
     }
 
     /// Persists ETag and Last-Modified when the network returns fresh data.
     @Test @MainActor func repository_savesValidatorsFromNetwork() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
         let cacheStore = TLECacheStore(directory: cacheDirectory)
         let policy = TLECachePolicy(staleAfter: 6 * 60 * 60)
-        let service = MockService()
+        let service = TLERepositoryTestSupport.MockService()
         await service.setResponse(
             .payload(
                 TLEFetchResponse(
-                    payload: Data(makeText(name: "VALIDATORS").utf8),
+                    payload: Data(TLERepositoryTestSupport.makeText(name: "VALIDATORS").utf8),
                     contentType: "text/tle",
                     sourceURL: URL(string: "https://example.com/remote")!,
                     etag: "\"abc123\"",
@@ -332,14 +229,14 @@ struct TLERepositoryTests {
     /// Revalidates stale cache on 304 and updates fetchedAt.
     @Test @MainActor func repository_revalidatesOnNotModified() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
         let cacheStore = TLECacheStore(directory: cacheDirectory)
         let policy = TLECachePolicy(staleAfter: 6 * 60 * 60)
         let sourceURL = URL(string: "https://example.com/cache")!
 
         try await cacheStore.save(
             queryKey: "SPACEMOBILE",
-            payload: Data(makeText(name: "CACHED").utf8),
+            payload: Data(TLERepositoryTestSupport.makeText(name: "CACHED").utf8),
             sourceURL: sourceURL,
             fetchedAt: now.addingTimeInterval(-7 * 60 * 60),
             contentType: "text/tle",
@@ -347,7 +244,7 @@ struct TLERepositoryTests {
             lastModified: "Tue, 31 Dec 2024 00:00:00 GMT"
         )
 
-        let service = MockService()
+        let service = TLERepositoryTestSupport.MockService()
         await service.setResponse(
             .notModified(
                 etag: "\"new\"",
@@ -376,23 +273,23 @@ struct TLERepositoryTests {
     /// Forces refresh to hit the network even when cache is still fresh.
     @Test @MainActor func refresh_alwaysUsesNetworkWhenAvailable() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
         let cacheStore = TLECacheStore(directory: cacheDirectory)
         let policy = TLECachePolicy(staleAfter: 6 * 60 * 60)
 
         try await cacheStore.save(
             queryKey: "SPACEMOBILE",
-            payload: Data(makeText(name: "FRESH-CACHE").utf8),
+            payload: Data(TLERepositoryTestSupport.makeText(name: "FRESH-CACHE").utf8),
             sourceURL: URL(string: "https://example.com/cache")!,
             fetchedAt: now.addingTimeInterval(-60),
             contentType: "text/tle"
         )
 
-        let service = MockService()
+        let service = TLERepositoryTestSupport.MockService()
         await service.setResponse(
             .payload(
                 TLEFetchResponse(
-                    payload: Data(makeText(name: "REFRESHED").utf8),
+                    payload: Data(TLERepositoryTestSupport.makeText(name: "REFRESHED").utf8),
                     contentType: "text/tle",
                     sourceURL: URL(string: "https://example.com/remote")!,
                     etag: nil,
@@ -417,19 +314,19 @@ struct TLERepositoryTests {
     /// Keeps the app functional when manual refresh fails but cache exists.
     @Test @MainActor func refresh_fallsBackToCacheWhenNetworkFails() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
         let cacheStore = TLECacheStore(directory: cacheDirectory)
 
         try await cacheStore.save(
             queryKey: "SPACEMOBILE",
-            payload: Data(makeText(name: "SAFE-CACHE").utf8),
+            payload: Data(TLERepositoryTestSupport.makeText(name: "SAFE-CACHE").utf8),
             sourceURL: URL(string: "https://example.com/cache")!,
             fetchedAt: now.addingTimeInterval(-120),
             contentType: "text/tle"
         )
 
-        let service = MockService()
-        await service.setError(MockError.failed)
+        let service = TLERepositoryTestSupport.MockService()
+        await service.setError(TLERepositoryTestSupport.MockError.failed)
 
         let repository = TLERepository(
             service: service,
@@ -446,19 +343,19 @@ struct TLERepositoryTests {
     /// Applies per-query 403 backoff and avoids repeated blocked calls.
     @Test @MainActor func getTLEs_on403WithCache_secondCallUsesBackoffWithoutNetwork() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
         let cacheStore = TLECacheStore(directory: cacheDirectory)
         let policy = TLECachePolicy(staleAfter: 60)
 
         try await cacheStore.save(
             queryKey: "SPACEMOBILE",
-            payload: Data(makeText(name: "CACHED").utf8),
+            payload: Data(TLERepositoryTestSupport.makeText(name: "CACHED").utf8),
             sourceURL: URL(string: "https://example.com/cache")!,
             fetchedAt: now.addingTimeInterval(-120),
             contentType: "text/tle"
         )
 
-        let service = MockService()
+        let service = TLERepositoryTestSupport.MockService()
         await service.setError(CelesTrakError.badStatus(403))
 
         let repository = TLERepository(
@@ -481,8 +378,8 @@ struct TLERepositoryTests {
     /// Applies 403 backoff even when no cache exists, preventing rapid retries.
     @Test @MainActor func getTLEs_on403WithoutCache_secondCallFailsWithoutSecondNetworkAttempt() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
-        let service = MockService()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
+        let service = TLERepositoryTestSupport.MockService()
         await service.setError(CelesTrakError.badStatus(403))
 
         let repository = TLERepository(
@@ -517,9 +414,9 @@ struct TLERepositoryTests {
     /// Allows retries again after the two-hour backoff window expires.
     @Test @MainActor func getTLEs_afterBackoffExpiry_retriesNetworkAndSucceeds() async throws {
         let initial = Date(timeIntervalSince1970: 1_000_000)
-        let mutableClock = MutableClock(initial)
-        let cacheDirectory = try makeTempDirectory()
-        let service = MockService()
+        let mutableClock = TLERepositoryTestSupport.MutableClock(initial)
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
+        let service = TLERepositoryTestSupport.MockService()
         await service.setError(CelesTrakError.badStatus(403))
 
         let repository = TLERepository(
@@ -543,7 +440,7 @@ struct TLERepositoryTests {
         await service.setResponse(
             .payload(
                 TLEFetchResponse(
-                    payload: Data(makeText(name: "RECOVERED").utf8),
+                    payload: Data(TLERepositoryTestSupport.makeText(name: "RECOVERED").utf8),
                     contentType: "text/tle",
                     sourceURL: URL(string: "https://example.com/remote")!,
                     etag: nil,
@@ -562,13 +459,13 @@ struct TLERepositoryTests {
     /// Shares one in-flight request across concurrent callers for the same key.
     @Test @MainActor func getTLEs_concurrentCallers_shareInFlightTask() async throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let cacheDirectory = try makeTempDirectory()
-        let service = MockService()
+        let cacheDirectory = try TLERepositoryTestSupport.makeTempDirectory()
+        let service = TLERepositoryTestSupport.MockService()
         await service.setDelayNanoseconds(200_000_000)
         await service.setResponse(
             .payload(
                 TLEFetchResponse(
-                    payload: Data(makeText(name: "IN-FLIGHT").utf8),
+                    payload: Data(TLERepositoryTestSupport.makeText(name: "IN-FLIGHT").utf8),
                     contentType: "text/tle",
                     sourceURL: URL(string: "https://example.com/remote")!,
                     etag: nil,

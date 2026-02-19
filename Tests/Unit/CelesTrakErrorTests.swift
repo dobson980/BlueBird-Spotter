@@ -2,7 +2,7 @@
 //  CelesTrakErrorTests.swift
 //  BlueBird SpotterTests
 //
-//  Created by Codex on 2/6/26.
+//  Created by Tom Dobson on 2/6/26.
 //
 
 import Testing

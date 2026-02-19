@@ -2,7 +2,7 @@
 //  InsideASTSView.swift
 //  BlueBird Spotter
 //
-//  Created by Codex on 2/5/26.
+//  Created by Tom Dobson on 2/5/26.
 //
 
 import SwiftUI

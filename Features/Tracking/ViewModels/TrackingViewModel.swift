@@ -59,59 +59,32 @@ final class TrackingViewModel {
             return
         }
 
-        trackingTask = Task.detached { [weak self, repository, orbitEngine, ticker] in
+        // Use a child task so cancellation follows the view model lifetime,
+        // while heavy work runs in nonisolated helpers off the main actor.
+        trackingTask = Task { [weak self, repository, orbitEngine, ticker] in
             guard let self else { return }
 
             do {
-                var fetchedAtDates: [Date] = []
-                var combinedTLEs: [TLE] = []
-                for queryKey in normalizedQueryKeys {
-                    let result = try await repository.getTLEs(queryKey: queryKey)
-                    combinedTLEs.append(contentsOf: result.tles)
-                    fetchedAtDates.append(result.fetchedAt)
+                let seed = try await Self.loadTrackingSeed(
+                    repository: repository,
+                    queryKeys: normalizedQueryKeys
+                )
+                await self.prepareForTracking(latestFetchedAt: seed.latestFetchedAt)
+
+                await Self.runTrackingLoop(
+                    satellites: seed.satellites,
+                    orbitEngine: orbitEngine,
+                    ticker: ticker
+                ) { [weak self] tracked, tick in
+                    guard let self else { return }
+                    await self.applyTrackingUpdate(tracked, at: tick)
                 }
-                let mergedTLEs = Self.deduplicatedTLEs(combinedTLEs)
-                let satellites = mergedTLEs.map { Self.makeSatellite(from: $0) }
-                let latestFetchedAt = fetchedAtDates.max()
-
-                await MainActor.run {
-                    self.trackedSatellites = []
-                    self.lastUpdatedAt = nil
-                    self.lastTLEFetchedAt = latestFetchedAt
-                }
-
-                for await tick in ticker.ticks() {
-                    guard !Task.isCancelled else { break }
-
-                    var tracked: [TrackedSatellite] = []
-                    tracked.reserveCapacity(satellites.count)
-                    for satellite in satellites {
-                        guard let position = try? orbitEngine.position(for: satellite, at: tick) else {
-                            continue
-                        }
-                        tracked.append(TrackedSatellite(satellite: satellite, position: position))
-                    }
-
-                    await MainActor.run {
-                        self.trackedSatellites = tracked
-                        self.lastUpdatedAt = tick
-                        self.state = .loaded(tracked)
-                    }
-                }
+            } catch is CancellationError {
+                // Cancellation is expected when the view disappears or refresh restarts.
             } catch let error as CelesTrakError {
-                await MainActor.run {
-                    self.state = .error(error.localizedDescription)
-                    self.trackedSatellites = []
-                    self.lastUpdatedAt = nil
-                    self.lastTLEFetchedAt = nil
-                }
+                await self.handleTrackingFailure(message: error.localizedDescription)
             } catch {
-                await MainActor.run {
-                    self.state = .error("An unexpected error occurred: \(error)")
-                    self.trackedSatellites = []
-                    self.lastUpdatedAt = nil
-                    self.lastTLEFetchedAt = nil
-                }
+                await self.handleTrackingFailure(message: "An unexpected error occurred: \(error)")
             }
         }
     }
@@ -120,6 +93,94 @@ final class TrackingViewModel {
     func stopTracking() {
         trackingTask?.cancel()
         trackingTask = nil
+    }
+
+    /// Represents the immutable seed data needed for the recurring tracking loop.
+    private struct TrackingSeed: Sendable {
+        let satellites: [Satellite]
+        let latestFetchedAt: Date?
+    }
+
+    /// Loads and deduplicates TLE records before streaming ticks.
+    ///
+    /// Nonisolated keeps repository fetch/decode work off the main actor.
+    nonisolated private static func loadTrackingSeed(
+        repository: TLERepository,
+        queryKeys: [String]
+    ) async throws -> TrackingSeed {
+        var fetchedAtDates: [Date] = []
+        var combinedTLEs: [TLE] = []
+        for queryKey in queryKeys {
+            let result = try await repository.getTLEs(queryKey: queryKey)
+            combinedTLEs.append(contentsOf: result.tles)
+            fetchedAtDates.append(result.fetchedAt)
+        }
+
+        let mergedTLEs = deduplicatedTLEs(combinedTLEs)
+        let satellites = mergedTLEs.map(makeSatellite(from:))
+        return TrackingSeed(
+            satellites: satellites,
+            latestFetchedAt: fetchedAtDates.max()
+        )
+    }
+
+    /// Runs the ticker loop and emits computed snapshots for UI application.
+    ///
+    /// The callback is `@Sendable` so Swift 6 enforces safe cross-actor captures.
+    nonisolated private static func runTrackingLoop(
+        satellites: [Satellite],
+        orbitEngine: any OrbitEngine,
+        ticker: TrackingTicker,
+        onTick: @escaping @Sendable ([TrackedSatellite], Date) async -> Void
+    ) async {
+        for await tick in ticker.ticks() {
+            guard !Task.isCancelled else { break }
+            let tracked = trackedSatellites(
+                satellites: satellites,
+                orbitEngine: orbitEngine,
+                at: tick
+            )
+            await onTick(tracked, tick)
+        }
+    }
+
+    /// Computes tracked snapshots for a specific timestamp.
+    nonisolated private static func trackedSatellites(
+        satellites: [Satellite],
+        orbitEngine: any OrbitEngine,
+        at tick: Date
+    ) -> [TrackedSatellite] {
+        var tracked: [TrackedSatellite] = []
+        tracked.reserveCapacity(satellites.count)
+        for satellite in satellites {
+            guard let position = try? orbitEngine.position(for: satellite, at: tick) else {
+                continue
+            }
+            tracked.append(TrackedSatellite(satellite: satellite, position: position))
+        }
+        return tracked
+    }
+
+    /// Resets UI state once initial TLE seed data is ready.
+    private func prepareForTracking(latestFetchedAt: Date?) {
+        trackedSatellites = []
+        lastUpdatedAt = nil
+        lastTLEFetchedAt = latestFetchedAt
+    }
+
+    /// Applies one computed snapshot to observable UI-facing properties.
+    private func applyTrackingUpdate(_ tracked: [TrackedSatellite], at tick: Date) {
+        trackedSatellites = tracked
+        lastUpdatedAt = tick
+        state = .loaded(tracked)
+    }
+
+    /// Applies a user-facing error and clears stale tracking state.
+    private func handleTrackingFailure(message: String) {
+        state = .error(message)
+        trackedSatellites = []
+        lastUpdatedAt = nil
+        lastTLEFetchedAt = nil
     }
 
     /// Builds a `Satellite` model from a TLE entry, parsing the NORAD id when possible.

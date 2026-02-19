@@ -2,7 +2,7 @@
 //  GlobeCameraController.swift
 //  BlueBird Spotter
 //
-//  Created by Codex on 2/18/26.
+//  Created by Tom Dobson on 2/18/26.
 //
 
 import CoreGraphics
@@ -206,10 +206,12 @@ final class GlobeCameraController {
 
         let yaw = -deltaX * panYawRadiansPerPoint
         let pitch = -deltaY * panPitchRadiansPerPoint
-        state.direction = rotatedDirection(
+        state.direction = GlobeCameraMath.rotatedDirection(
             from: state.direction,
             yawRadians: yaw,
-            pitchRadians: pitch
+            pitchRadians: pitch,
+            maxPitchRadians: maxPitchRadians,
+            fallbackDirection: homeDirection
         )
         applyCurrentPose()
         return didDeselect
@@ -249,7 +251,11 @@ final class GlobeCameraController {
             pinchScaleStepBounds.lowerBound,
             pinchScaleStepBounds.upperBound
         )
-        let targetDistance = clampedDistance(state.distance / boundedScaleStep)
+        let targetDistance = GlobeCameraMath.clampedDistance(
+            state.distance / boundedScaleStep,
+            minimumDistance: minimumDistance,
+            maximumDistance: maximumDistance
+        )
         state.distance = targetDistance
         applyCurrentPose()
     }
@@ -296,26 +302,18 @@ final class GlobeCameraController {
 
         transition.elapsed += frameDelta
         let progress = transition.transitionProgress
-        let easedProgress = smoothstep(progress)
-
         let resolvedTargetDirection = transitionTargetDirection(for: transition)
-        let clampedStart = clampedDirectionToVerticalLimits(transition.startDirection)
-        let clampedTarget = clampedDirectionToVerticalLimits(resolvedTargetDirection)
-
-        if easedProgress < transition.rotationPhase {
-            // Phase 1: orbit to target while preserving current zoom.
-            let rotationT = easedProgress / max(0.0001, transition.rotationPhase)
-            state.direction = slerpDirection(from: clampedStart, to: clampedTarget, t: rotationT)
-            state.distance = clampedDistance(transition.startDistance)
-        } else {
-            // Phase 2: keep target centered and blend only distance.
-            let zoomT = (easedProgress - transition.rotationPhase) / max(0.0001, 1 - transition.rotationPhase)
-            let easedZoom = smoothstep(zoomT)
-            state.direction = clampedTarget
-            let nextDistance = transition.startDistance
-                + ((transition.targetDistance - transition.startDistance) * easedZoom)
-            state.distance = clampedDistance(nextDistance)
-        }
+        let frame = GlobeCameraTransitionMath.interpolatedPose(
+            transition: transition,
+            progress: progress,
+            resolvedTargetDirection: resolvedTargetDirection,
+            minimumDistance: minimumDistance,
+            maximumDistance: maximumDistance,
+            maxPitchRadians: maxPitchRadians,
+            fallbackDirection: homeDirection
+        )
+        state.direction = frame.direction
+        state.distance = frame.distance
 
         if progress >= 1 {
             state.transition = nil
@@ -344,21 +342,19 @@ final class GlobeCameraController {
             return
         }
 
-        let currentDirection = state.direction
-        let clampedDot = simd_clamp(simd_dot(currentDirection, targetDirection), -1, 1)
-        let angularDelta = acos(clampedDot)
-        if angularDelta < 0.00005 {
-            state.direction = targetDirection
-            state.distance = clampedDistance(state.distance)
-            return
-        }
-
-        // Adaptive blend keeps lock-on stable for both slow drift and fast passes.
-        let frameScale = max(0.25, min(3.0, frameDelta / nominalFrameDelta))
-        let baseT = max(0.08, min(0.35, angularDelta * 0.85))
-        let interpolationT = max(0.08, min(0.55, baseT * frameScale))
-        state.direction = slerpDirection(from: currentDirection, to: targetDirection, t: interpolationT)
-        state.distance = clampedDistance(state.distance)
+        state.direction = GlobeCameraTransitionMath.followDirection(
+            currentDirection: state.direction,
+            targetDirection: targetDirection,
+            frameDelta: frameDelta,
+            nominalFrameDelta: nominalFrameDelta,
+            maxPitchRadians: maxPitchRadians,
+            fallbackDirection: homeDirection
+        )
+        state.distance = GlobeCameraMath.clampedDistance(
+            state.distance,
+            minimumDistance: minimumDistance,
+            maximumDistance: maximumDistance
+        )
     }
 
     /// Builds a new transition anchored to the current camera pose.
@@ -367,25 +363,16 @@ final class GlobeCameraController {
         targetDirection: simd_float3,
         targetDistance: Float
     ) -> GlobeCameraTransition {
-        let clampedTargetDirection = clampedDirectionToVerticalLimits(targetDirection)
-        let startDirection = clampedDirectionToVerticalLimits(state.direction)
-        let startDistance = clampedDistance(state.distance)
-        let clampedTargetDistance = clampedDistance(targetDistance)
-
-        let angle = acos(simd_clamp(simd_dot(startDirection, clampedTargetDirection), -1, 1))
-        let baseDuration: Float = angle > 2.6 ? 1.0 : 0.8
-        let distanceDelta = abs(clampedTargetDistance - startDistance)
-        let zoomDeltaDuration = min(0.55, distanceDelta * 0.24)
-
-        return GlobeCameraTransition(
+        GlobeCameraTransitionMath.makeTransition(
             kind: kind,
-            startDirection: startDirection,
-            startDistance: startDistance,
-            targetDirection: clampedTargetDirection,
-            targetDistance: clampedTargetDistance,
-            duration: baseDuration + zoomDeltaDuration,
-            rotationPhase: 0.9,
-            elapsed: 0
+            startDirection: state.direction,
+            startDistance: state.distance,
+            targetDirection: targetDirection,
+            targetDistance: targetDistance,
+            minimumDistance: minimumDistance,
+            maximumDistance: maximumDistance,
+            maxPitchRadians: maxPitchRadians,
+            fallbackDirection: homeDirection
         )
     }
 
@@ -420,15 +407,31 @@ final class GlobeCameraController {
         let vector = simd_float3(position.x, position.y, position.z)
         let length = simd_length(vector)
         guard length.isFinite, length > 0.001 else { return }
-        state.direction = clampedDirectionToVerticalLimits(vector / length)
-        state.distance = clampedDistance(length)
+        state.direction = GlobeCameraMath.clampedDirectionToVerticalLimits(
+            vector / length,
+            maxPitchRadians: maxPitchRadians,
+            fallbackDirection: homeDirection
+        )
+        state.distance = GlobeCameraMath.clampedDistance(
+            length,
+            minimumDistance: minimumDistance,
+            maximumDistance: maximumDistance
+        )
     }
 
     /// Writes the current state pose into the managed camera node.
     private func applyCurrentPose() {
         guard let cameraNode else { return }
-        let clampedDirection = clampedDirectionToVerticalLimits(state.direction)
-        let clampedDistance = clampedDistance(state.distance)
+        let clampedDirection = GlobeCameraMath.clampedDirectionToVerticalLimits(
+            state.direction,
+            maxPitchRadians: maxPitchRadians,
+            fallbackDirection: homeDirection
+        )
+        let clampedDistance = GlobeCameraMath.clampedDistance(
+            state.distance,
+            minimumDistance: minimumDistance,
+            maximumDistance: maximumDistance
+        )
         let position = clampedDirection * clampedDistance
 
         guard position.x.isFinite, position.y.isFinite, position.z.isFinite else { return }
@@ -441,32 +444,7 @@ final class GlobeCameraController {
     ///
     /// Using an explicit basis avoids roll flips that can make Earth appear upside down.
     private func orientCameraNodeTowardOrigin(_ node: SCNNode, position: simd_float3) {
-        let forward = simd_normalize(-position)
-        let worldUp = simd_float3(0, 1, 0)
-
-        var right = simd_cross(forward, worldUp)
-        let rightLength = simd_length(right)
-        if rightLength > 0.001 {
-            right /= rightLength
-        } else {
-            // Near-pole fallback keeps a stable right axis.
-            right = simd_float3(1, 0, 0)
-        }
-
-        let up = simd_cross(right, forward)
-        let rotationMatrix = simd_float4x4(columns: (
-            simd_float4(right.x, right.y, right.z, 0),
-            simd_float4(up.x, up.y, up.z, 0),
-            simd_float4(-forward.x, -forward.y, -forward.z, 0),
-            simd_float4(0, 0, 0, 1)
-        ))
-
-        node.simdTransform = simd_float4x4(columns: (
-            rotationMatrix.columns.0,
-            rotationMatrix.columns.1,
-            rotationMatrix.columns.2,
-            simd_float4(position.x, position.y, position.z, 1)
-        ))
+        node.simdTransform = GlobeCameraPoseWriter.makeTransform(lookingAtOriginFrom: position)
     }
 
     /// Converts a satellite id into a normalized scene-space direction.
@@ -474,101 +452,19 @@ final class GlobeCameraController {
         guard let rawDirection = satelliteDirectionProvider?(satelliteId) else {
             return nil
         }
-        return sanitizeDirection(rawDirection)
-    }
-
-    /// Applies yaw and pitch deltas to a direction vector.
-    private func rotatedDirection(
-        from direction: simd_float3,
-        yawRadians: Float,
-        pitchRadians: Float
-    ) -> simd_float3 {
-        let safeDirection = sanitizeDirection(direction) ?? homeDirection
-        let yawRotation = simd_quatf(angle: yawRadians, axis: simd_float3(0, 1, 0))
-        var nextDirection = yawRotation.act(safeDirection)
-
-        // Pitch around camera-right so vertical drag feels natural from any longitude.
-        var rightAxis = simd_cross(simd_float3(0, 1, 0), nextDirection)
-        let rightLength = simd_length(rightAxis)
-        if rightLength > 0.0001 {
-            rightAxis /= rightLength
-        } else {
-            rightAxis = simd_float3(1, 0, 0)
-        }
-        let pitchRotation = simd_quatf(angle: pitchRadians, axis: rightAxis)
-        nextDirection = pitchRotation.act(nextDirection)
-        return clampedDirectionToVerticalLimits(nextDirection)
-    }
-
-    /// Clamps distance to configured safety limits.
-    private func clampedDistance(_ value: Float) -> Float {
-        min(max(value, minimumDistance), maximumDistance)
+        return GlobeCameraMath.sanitizeDirection(
+            rawDirection,
+            maxPitchRadians: maxPitchRadians,
+            fallbackDirection: homeDirection
+        )
     }
 
     /// Computes the entry zoom used when focus transition begins.
     private var selectionFocusDistance: Float {
-        clampedDistance(max(0.6, homeDistance * selectionZoomMultiplier))
-    }
-
-    /// Sanitizes and normalizes direction vectors.
-    private func sanitizeDirection(_ vector: simd_float3) -> simd_float3? {
-        let length = simd_length(vector)
-        guard length.isFinite, length > 0.0001 else { return nil }
-        let normalized = vector / length
-        guard normalized.x.isFinite, normalized.y.isFinite, normalized.z.isFinite else { return nil }
-        return clampedDirectionToVerticalLimits(normalized)
-    }
-
-    /// Clamps camera pitch so orbit controls remain stable near the poles.
-    private func clampedDirectionToVerticalLimits(_ direction: simd_float3) -> simd_float3 {
-        let length = simd_length(direction)
-        guard length > 0.0001, length.isFinite else {
-            return homeDirection
-        }
-
-        let normalized = direction / length
-        guard normalized.x.isFinite, normalized.y.isFinite, normalized.z.isFinite else {
-            return homeDirection
-        }
-
-        let maxY = sin(maxPitchRadians)
-        let clampedY = max(-maxY, min(maxY, normalized.y))
-        let horizontal = simd_float2(normalized.x, normalized.z)
-        let horizontalLength = simd_length(horizontal)
-        let horizontalScale = sqrt(max(0.01, 1 - (clampedY * clampedY)))
-
-        let clampedHorizontal: simd_float2
-        if horizontalLength > 0.0001 {
-            clampedHorizontal = (horizontal / horizontalLength) * horizontalScale
-        } else {
-            clampedHorizontal = simd_float2(0, horizontalScale)
-        }
-
-        return simd_float3(clampedHorizontal.x, clampedY, clampedHorizontal.y)
-    }
-
-    /// Smoothstep easing for perceptually stable motion.
-    private func smoothstep(_ value: Float) -> Float {
-        let clamped = simd_clamp(value, 0, 1)
-        return clamped * clamped * (3 - (2 * clamped))
-    }
-
-    /// Spherical interpolation between two normalized direction vectors.
-    private func slerpDirection(from a: simd_float3, to b: simd_float3, t: Float) -> simd_float3 {
-        let clampedT = simd_clamp(t, 0, 1)
-        let clampedDot = simd_clamp(simd_dot(a, b), -1, 1)
-        let angle = acos(clampedDot)
-        if angle < 0.001 {
-            return b
-        }
-
-        let sinAngle = sin(angle)
-        if abs(sinAngle) < 0.0001 {
-            return clampedDirectionToVerticalLimits(simd_normalize(a * (1 - clampedT) + b * clampedT))
-        }
-
-        let weightA = sin((1 - clampedT) * angle) / sinAngle
-        let weightB = sin(clampedT * angle) / sinAngle
-        return clampedDirectionToVerticalLimits((a * weightA) + (b * weightB))
+        GlobeCameraMath.clampedDistance(
+            max(0.6, homeDistance * selectionZoomMultiplier),
+            minimumDistance: minimumDistance,
+            maximumDistance: maximumDistance
+        )
     }
 }
