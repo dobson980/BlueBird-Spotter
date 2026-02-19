@@ -19,7 +19,9 @@ jobs:
       - name: Select Latest Installed Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest
+          # Avoid release-candidate/toolchain drift that can introduce flaky
+          # simulator test startup behavior on hosted runners.
+          xcode-version: latest-stable
 
       - name: Show Xcode Version
         run: xcodebuild -version
@@ -28,77 +30,69 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Some runner images occasionally start without usable iOS simulators.
-          # If no iPhone simulator is available, request the iOS platform runtime.
-          if ! xcrun simctl list devices available | grep -q "iPhone"; then
-            echo "No available iPhone simulators detected. Downloading iOS platform runtime..."
+          # Hosted images can occasionally miss the iOS 26 runtime even when
+          # Xcode is installed. Requesting the iOS platform fills that gap.
+          if ! xcrun simctl list runtimes available | grep -Eq "iOS 26(\\.| )"; then
+            echo "No iOS 26 runtime detected. Downloading iOS platform runtime..."
             xcodebuild -downloadPlatform iOS
           fi
 
-          # If runtime exists but no iPhone simulator device was created, create one.
-          if ! xcrun simctl list devices available | grep -q "iPhone"; then
-            runtime_id="$(
-              xcrun simctl list runtimes available | \
-              awk -F ' - ' '/iOS/ && /SimRuntime\\.iOS/ { print $2; exit }'
-            )"
-            device_type_id="$(
-              xcrun simctl list devicetypes | \
-              awk -F '[()]' '
-                /iPhone 16/ { print $2; foundPreferred = 1; exit }
-                /iPhone/ && !fallback { fallback = $2 }
-                END {
-                  if (!foundPreferred && fallback != "") {
-                    print fallback
-                  }
-                }
-              '
-            )"
-
-            if [ -n "${runtime_id}" ] && [ -n "${device_type_id}" ]; then
-              echo "Creating fallback simulator with runtime ${runtime_id} and device type ${device_type_id}..."
-              xcrun simctl create "BlueBird Spotter CI iPhone" "${device_type_id}" "${runtime_id}" || true
-            fi
-          fi
-
+          echo "Available simulator runtimes:"
+          xcrun simctl list runtimes available
           echo "Available simulator devices:"
           xcrun simctl list devices available
 
-      - name: Select iOS 26 Simulator
+      - name: Create and Boot Dedicated iOS 26 Simulator
         run: |
           set -euo pipefail
 
-          simulator_id="$(
-            xcrun simctl list devices available | \
-            awk '
-              /^-- iOS 26/ { in_iOS26 = 1; next }
-              /^-- / { in_iOS26 = 0 }
-              in_iOS26 && /iPhone 17 \(/ {
-                if (match($0, /\(([A-F0-9-]+)\)/)) {
-                  print substr($0, RSTART + 1, RLENGTH - 2);
-                  foundPreferred = 1;
-                  exit;
-                }
-              }
-              in_iOS26 && /iPhone/ && !fallback {
-                if (match($0, /\(([A-F0-9-]+)\)/)) {
-                  fallback = substr($0, RSTART + 1, RLENGTH - 2);
-                }
+          runtime_id="$(
+            xcrun simctl list runtimes available | \
+            awk -F ' - ' '
+              /iOS 26/ && /SimRuntime\.iOS/ {
+                id = $NF;
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", id);
+                print id;
+                found = 1;
+                exit;
               }
               END {
-                if (!foundPreferred && fallback != "") {
-                  print fallback;
+                if (!found) {
+                  exit 1;
                 }
               }
             '
           )"
 
-          if [ -z "${simulator_id}" ]; then
-            echo "No iOS 26 iPhone simulator was found."
-            xcrun simctl list devices available
+          device_type_id="$(
+            xcrun simctl list devicetypes | \
+            awk -F '[()]' '
+              /iPhone 17/ { print $2; foundPreferred = 1; exit }
+              /iPhone/ && !fallback { fallback = $2 }
+              END {
+                if (!foundPreferred && fallback != "") {
+                  print fallback
+                }
+              }
+            '
+          )"
+
+          if [ -z "${runtime_id}" ] || [ -z "${device_type_id}" ]; then
+            echo "Unable to resolve iOS 26 runtime or iPhone device type."
+            xcrun simctl list runtimes available
+            xcrun simctl list devicetypes
             exit 1
           fi
 
+          simulator_name="BlueBird Spotter CI ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          simulator_id="$(xcrun simctl create "${simulator_name}" "${device_type_id}" "${runtime_id}")"
+
+          # Boot and wait to avoid xcodebuild stalling while CoreSimulator starts.
+          xcrun simctl boot "${simulator_id}" || true
+          xcrun simctl bootstatus "${simulator_id}" -b
+
           echo "SIMULATOR_ID=${simulator_id}" >> "$GITHUB_ENV"
+          echo "SIMULATOR_NAME=${simulator_name}" >> "$GITHUB_ENV"
           echo "Using simulator id: ${simulator_id}"
 
       - name: Run Unit Tests
@@ -121,6 +115,9 @@ jobs:
             -scheme "BlueBird Spotter UnitTests" \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID,arch=arm64" \
             -destination-timeout 120 \
+            -parallel-testing-enabled NO \
+            -maximum-concurrent-test-simulator-destinations 1 \
+            -maximum-concurrent-test-device-destinations 1 \
             -only-testing:"BlueBird SpotterTests" \
             -skip-testing:"BlueBird SpotterUITests" \
             -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
@@ -129,6 +126,15 @@ jobs:
             COMPILER_INDEX_STORE_ENABLE=NO \
             ENABLE_PREVIEWS=NO \
             test
+
+      - name: Delete Dedicated Simulator
+        if: always()
+        run: |
+          set +e
+          if [ -n "${SIMULATOR_ID:-}" ]; then
+            xcrun simctl shutdown "${SIMULATOR_ID}" || true
+            xcrun simctl delete "${SIMULATOR_ID}" || true
+          fi
 
       - name: Upload Unit Test Result Bundle
         if: always()
