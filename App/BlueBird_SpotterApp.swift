@@ -16,6 +16,8 @@ import SwiftUI
 struct BlueBird_SpotterApp: App {
     /// Observes lifecycle changes to schedule background refresh work.
     @Environment(\.scenePhase) private var scenePhase
+    /// Persists the app-wide appearance preference selected from globe settings.
+    @AppStorage("app.appearance.mode") private var appAppearanceModeRaw = AppAppearanceMode.system.rawValue
     /// Coordinates background task registration and scheduling.
     private let backgroundRefreshManager = TLEBackgroundRefreshManager.shared
 
@@ -27,6 +29,7 @@ struct BlueBird_SpotterApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(compositionRoot: .live)
+                .preferredColorScheme(appAppearanceMode.preferredColorScheme)
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .background else { return }
@@ -34,5 +37,10 @@ struct BlueBird_SpotterApp: App {
                 await backgroundRefreshManager.scheduleIfNeeded(queryKey: "SPACEMOBILE")
             }
         }
+    }
+
+    /// Resolves persisted raw storage into a safe enum value.
+    private var appAppearanceMode: AppAppearanceMode {
+        AppAppearanceMode(rawValue: appAppearanceModeRaw) ?? .system
     }
 }

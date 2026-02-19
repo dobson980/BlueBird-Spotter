@@ -102,16 +102,38 @@ jobs:
           echo "Using simulator id: ${simulator_id}"
 
       - name: Run Unit Tests
+        timeout-minutes: 25
         run: |
           set -euo pipefail
 
+          # Emit a periodic heartbeat so long-running compile/test phases remain
+          # visible in GitHub logs instead of appearing frozen.
+          (
+            while true; do
+              echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Unit test job still running..."
+              sleep 60
+            done
+          ) &
+          heartbeat_pid=$!
+          trap 'kill "${heartbeat_pid}" 2>/dev/null || true' EXIT
+
           xcodebuild \
             -scheme "BlueBird Spotter UnitTests" \
-            -destination "id=$SIMULATOR_ID" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID,arch=arm64" \
+            -destination-timeout 120 \
             -only-testing:"BlueBird SpotterTests" \
             -skip-testing:"BlueBird SpotterUITests" \
             -derivedDataPath "$RUNNER_TEMP/BlueBirdSpotter-DerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/BlueBirdSpotter-UnitTests.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
             ENABLE_PREVIEWS=NO \
             test
+
+      - name: Upload Unit Test Result Bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlueBirdSpotter-UnitTests-xcresult
+          path: ${{ runner.temp }}/BlueBirdSpotter-UnitTests.xcresult
+          if-no-files-found: ignore

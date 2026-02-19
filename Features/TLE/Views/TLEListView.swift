@@ -15,6 +15,8 @@ import SwiftUI
 struct TLEListView: View {
     /// Local view model state so the UI refreshes when data changes.
     @State private var viewModel: CelesTrakViewModel
+    /// Stores collapsed section IDs so users can hide categories they are not inspecting.
+    @State private var collapsedSectionIDs: Set<String> = []
     /// Shared navigation state for cross-tab focus.
     @Environment(AppNavigationState.self) private var navigationState
     /// Tracks light/dark mode for adaptive styling.
@@ -47,6 +49,7 @@ struct TLEListView: View {
                         } label: {
                             Image(systemName: "arrow.clockwise")
                         }
+                        .buttonStyle(.glass)
                         .disabled(viewModel.state.isLoading)
                         .accessibilityLabel("Refresh TLEs")
                     }
@@ -81,22 +84,12 @@ struct TLEListView: View {
                 let sections = groupedTLEs(tles)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(sections) { section in
-                            sectionHeader(
-                                title: section.category.label,
-                                count: section.tles.count
-                            )
-
-                            ForEach(section.tles, id: \.line1) { tle in
-                                tleRow(tle)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        // Tap a row to jump to the globe and focus the satellite.
-                                        guard let id = SatelliteIDParser.parseNoradId(line1: tle.line1) else { return }
-                                        navigationState.focusOnSatellite(id: id)
-                                    }
+                        if #available(iOS 26.0, macOS 26.0, *) {
+                            GlassEffectContainer(spacing: 12) {
+                                sectionRows(for: sections)
                             }
+                        } else {
+                            sectionRows(for: sections)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -179,63 +172,66 @@ struct TLEListView: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(showError ? .red : .secondary)
         }
+        .padding(16)
+        .frame(maxWidth: 320)
+        .blueBirdHUDCard(
+            cornerRadius: 16,
+            tint: showError ? .red : Color(red: 0.04, green: 0.61, blue: 0.86)
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+        .padding(.horizontal, 16)
     }
 
     /// Builds a card-style row for a single TLE entry with a subtle space glow.
     private func tleRow(_ tle: TLE) -> some View {
         let descriptor = SatelliteProgramCatalog.descriptor(forTLEName: tle.name, line1: tle.line1)
+        let noradID = SatelliteIDParser.parseNoradId(line1: tle.line1)
 
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
                 Image(systemName: "antenna.radiowaves.left.and.right")
-                    .font(.caption)
-                    .foregroundStyle(.tint)
-                    .padding(6)
-                    .background(.thinMaterial, in: Circle())
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.95))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(descriptor.displayName)
-                        .font(.headline)
+                        .font(.system(.body, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.white)
+
                     if let catalogName = tle.name, descriptor.displayName != catalogName {
                         Text(catalogName)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.82))
                     }
                 }
+
+                Spacer(minLength: 0)
+
+                if let noradID {
+                    capsuleChip(icon: "number", text: "\(noradID)")
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(BlueBirdHUDStyle.headerGradient)
+
+            Divider()
+                .overlay(.white.opacity(colorScheme == .dark ? 0.14 : 0.22))
 
             VStack(alignment: .leading, spacing: 6) {
-                tleLine(tle.line1)
-                tleLine(tle.line2)
+                VStack(alignment: .leading, spacing: 6) {
+                    tleLine(tle.line1)
+                    tleLine(tle.line2)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .blueBirdHUDInset(cornerRadius: 10)
             }
-            .padding(8)
+            .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                secondaryCardBackground(cornerRadius: 10)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background {
-            primaryCardBackground(cornerRadius: 16)
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(cardBorderGradient, lineWidth: 1)
-        )
-        .overlay(alignment: .topLeading) {
-            // Thin highlight line adds a sci-fi HUD accent without heavy glow.
-            Capsule()
-                .fill(highlightGradient)
-                .frame(width: 120, height: 2)
-                .padding(.top, 8)
-                .padding(.leading, 12)
-                .opacity(0.6)
-        }
-        .shadow(color: cardShadowColor, radius: 4, x: 0, y: 2)
-        .clipped()
+        .blueBirdHUDCard(cornerRadius: 16, tint: Color(red: 0.04, green: 0.61, blue: 0.86))
     }
 
     /// Keeps fixed-width TLE strings readable without forcing the card wider than the screen.
@@ -253,20 +249,82 @@ struct TLEListView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Builds a compact group header for category segmentation.
-    private func sectionHeader(title: String, count: Int) -> some View {
-        HStack(spacing: 8) {
-            Text(title)
-                .font(.title3.weight(.semibold))
-            Text("\(count)")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.thinMaterial, in: Capsule())
-            Spacer(minLength: 0)
+    /// Builds a collapsible section header that matches the shared HUD label style.
+    private func sectionHeader(
+        title: String,
+        count: Int,
+        isCollapsed: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        BlueBirdCollapsibleSectionHeader(
+            title: title,
+            count: count,
+            isCollapsed: isCollapsed,
+            action: action
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 2)
+    }
+
+    /// Capsule badge used in row-header metadata.
+    private func capsuleChip(icon: String, text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.caption2.weight(.semibold))
+            Text(text)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
         }
-        .padding(.top, 4)
+        .foregroundStyle(.white.opacity(0.95))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.white.opacity(0.16), in: Capsule())
+    }
+
+    /// Reusable section renderer so list composition can opt into `GlassEffectContainer`.
+    @ViewBuilder
+    private func sectionRows(for sections: [TLESection]) -> some View {
+        ForEach(sections) { section in
+            let isCollapsed = collapsedSectionIDs.contains(section.id)
+
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader(
+                    title: section.category.label,
+                    count: section.tles.count,
+                    isCollapsed: isCollapsed
+                ) {
+                    toggleSection(sectionID: section.id)
+                }
+
+                if !isCollapsed {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(section.tles, id: \.line1) { tle in
+                            tleRow(tle)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    // Tap a row to jump to the globe and focus the satellite.
+                                    guard let id = SatelliteIDParser.parseNoradId(line1: tle.line1) else { return }
+                                    navigationState.focusOnSatellite(id: id)
+                                }
+                        }
+                    }
+                    // Keep expansion visually anchored under the section label.
+                    .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    /// Expands or collapses a category section with a short animation.
+    private func toggleSection(sectionID: String) {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            if collapsedSectionIDs.contains(sectionID) {
+                collapsedSectionIDs.remove(sectionID)
+            } else {
+                collapsedSectionIDs.insert(sectionID)
+            }
+        }
     }
 
     /// Full-screen space backdrop shared across tabs.
@@ -280,73 +338,6 @@ struct TLEListView: View {
                 .overlay(Color.black.opacity(colorScheme == .dark ? 0.08 : 0.0))
         }
         .ignoresSafeArea()
-    }
-
-    /// Primary card background with adaptive material for light/dark modes.
-    @ViewBuilder
-    private func primaryCardBackground(cornerRadius: CGFloat) -> some View {
-        if colorScheme == .dark {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color.black.opacity(0.45))
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
-        } else {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color.white.opacity(0.7))
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
-        }
-    }
-
-    /// Secondary inset background that frames the TLE lines.
-    @ViewBuilder
-    private func secondaryCardBackground(cornerRadius: CGFloat) -> some View {
-        if colorScheme == .dark {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color.white.opacity(0.03))
-        } else {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color.black.opacity(0.06))
-        }
-    }
-
-    /// Soft neon border that is stronger in dark mode and subtle in light mode.
-    private var cardBorderGradient: LinearGradient {
-        if colorScheme == .dark {
-            return LinearGradient(
-                colors: [
-                    .white.opacity(0.06),
-                    .cyan.opacity(0.08),
-                    .purple.opacity(0.05)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-        return LinearGradient(
-            colors: [
-                .black.opacity(0.08),
-                .cyan.opacity(0.05)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    /// Glow tint that stays restrained in light mode.
-    private var cardShadowColor: Color {
-        colorScheme == .dark ? .cyan.opacity(0.015) : .cyan.opacity(0.008)
-    }
-
-    /// Subtle highlight used for the top accent line.
-    private var highlightGradient: LinearGradient {
-        LinearGradient(
-            colors: [
-                .cyan.opacity(colorScheme == .dark ? 0.25 : 0.15),
-                .purple.opacity(colorScheme == .dark ? 0.18 : 0.1),
-                .clear
-            ],
-            startPoint: .leading,
-            endPoint: .trailing
-        )
     }
 
     /// Detects when the view is running in Xcode previews.

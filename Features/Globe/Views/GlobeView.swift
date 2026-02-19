@@ -16,6 +16,8 @@ struct GlobeView: View {
     @Environment(AppNavigationState.self) private var navigationState
     /// Stores the persisted directional light toggle.
     @AppStorage("globe.light.directional.enabled") private var directionalLightEnabled = true
+    /// Stores the persisted app-wide appearance preference.
+    @AppStorage("app.appearance.mode") private var appAppearanceModeRaw = AppAppearanceMode.system.rawValue
     /// Stores the persisted orbit path mode selection.
     @AppStorage("globe.orbit.mode") private var orbitPathModeRaw = OrbitPathMode.selectedOnly.rawValue
     /// Stores the persisted orbit path thickness for the ribbon.
@@ -226,6 +228,19 @@ struct GlobeView: View {
         )
     }
 
+    /// Converts persisted raw storage into a safe app appearance enum.
+    private var appAppearanceMode: AppAppearanceMode {
+        AppAppearanceMode(rawValue: appAppearanceModeRaw) ?? .system
+    }
+
+    /// Binds app appearance mode selection to persisted raw storage.
+    private var appAppearanceModeBinding: Binding<AppAppearanceMode> {
+        Binding(
+            get: { appAppearanceMode },
+            set: { appAppearanceModeRaw = $0.rawValue }
+        )
+    }
+
     /// Returns the selected orbit color option, defaulting to ASTS orange.
     private var orbitPathColorOption: OrbitPathColorOption {
         OrbitPathColorOption.options.first { $0.id == orbitPathColorId } ?? OrbitPathColorOption.defaultOption
@@ -264,98 +279,14 @@ struct GlobeView: View {
 
     /// Presents a compact settings card with globe-specific toggles.
     private var settingsPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Globe Settings")
-                .font(.subheadline.weight(.semibold))
-
-            Toggle("Sunlight (Real-Time)", isOn: $directionalLightEnabled)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Coverage Footprints (Estimate)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Picker("Coverage Footprints", selection: coverageModeBinding) {
-                    ForEach(CoverageFootprintMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text("Educational estimate using satellite altitude, calibrated elevation masks, and a scan-limit clamp. Not exact live RF coverage.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Orbit Paths")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Picker("Orbit Paths", selection: orbitPathModeBinding) {
-                    ForEach(OrbitPathMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Path Thickness")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                // The slider lets readers see how a continuous control maps to orbit thickness.
-                Text("\(orbitPathThickness, specifier: "%.3f")")
-                    .monospacedDigit()
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Slider(value: $orbitPathThickness, in: 0.001...0.02, step: 0.001)
-                    .tint(orbitPathColorOption.color)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Path Color")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                // Swatch buttons keep the choice visual and quick to scan.
-                HStack(spacing: 8) {
-                    ForEach(OrbitPathColorOption.options) { option in
-                        Button {
-                            orbitPathColorId = option.id
-                        } label: {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(option.color)
-                                .frame(width: 22, height: 22)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .stroke(option.id == orbitPathColorId ? Color.white : Color.white.opacity(0.2), lineWidth: 1)
-                                )
-                                .overlay(
-                                    Group {
-                                        if option.id == orbitPathColorId {
-                                            Image(systemName: "checkmark")
-                                                .font(.caption2.weight(.bold))
-                                                .foregroundStyle(.white)
-                                        }
-                                    }
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(.white.opacity(0.15), lineWidth: 1)
+        GlobeSettingsPanel(
+            appAppearanceMode: appAppearanceModeBinding,
+            directionalLightEnabled: $directionalLightEnabled,
+            coverageMode: coverageModeBinding,
+            orbitPathMode: orbitPathModeBinding,
+            orbitPathThickness: $orbitPathThickness,
+            orbitPathColorId: $orbitPathColorId
         )
-        .shadow(color: .black.opacity(0.18), radius: 12, x: 0, y: 6)
-        .frame(maxWidth: 260)
     }
 
     /// Provides the debug stats callback when the build supports it.

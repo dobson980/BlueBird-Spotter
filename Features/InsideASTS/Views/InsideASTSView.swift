@@ -52,7 +52,7 @@ struct InsideASTSView: View {
                     VStack(spacing: 2) {
                         Text("Inside ASTS")
                             .font(.headline.weight(.semibold))
-                        Text("Big-picture context, simplified")
+                        Text("Company, satellites, and model")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -63,30 +63,44 @@ struct InsideASTSView: View {
 
     /// Introduces the page with a concise orientation card.
     private var heroCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            featureImage(assetName: "inside-asts-hero", fallbackIcon: "globe.americas.fill", fallbackTitle: "Add asset: inside-asts-hero")
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "info.circle.fill")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.95))
 
-            Text(InsideASTSContent.heroIntro)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                metricChip(title: "Coverage Vision", value: "Global")
-                metricChip(title: "MNO Agreements", value: "50+")
-                metricChip(title: "Subscriber Reach", value: "~3B")
+                Text("Inside ASTS")
+                    .font(.system(.title3, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.white)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(BlueBirdHUDStyle.headerGradient)
 
-            Text(InsideASTSContent.heroSnapshot)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            Divider()
+                .overlay(.white.opacity(colorScheme == .dark ? 0.14 : 0.22))
+
+            VStack(alignment: .leading, spacing: 12) {
+                featureImage(assetName: "inside-asts-hero", fallbackIcon: "globe.americas.fill", fallbackTitle: "Add asset: inside-asts-hero")
+
+                Text(InsideASTSContent.heroIntro)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    metricChip(title: "Coverage Vision", value: "Global")
+                    metricChip(title: "MNO Agreements", value: "50+")
+                    metricChip(title: "Subscriber Reach", value: "~3B")
+                }
+
+                Text(InsideASTSContent.heroSnapshot)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(12)
         }
-        .padding(12)
-        .background { primaryCardBackground(cornerRadius: 16) }
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(cardBorderGradient, lineWidth: 1)
-        )
-        .shadow(color: cardShadowColor, radius: 4, x: 0, y: 2)
+        .blueBirdHUDCard(cornerRadius: 16, tint: Color(red: 0.04, green: 0.61, blue: 0.86))
     }
 
     /// Summarizes AST SpaceMobile's mission, history, and commercial position.
@@ -94,7 +108,7 @@ struct InsideASTSView: View {
         expandableCard(
             id: .company,
             title: "AST SpaceMobile: Mission and Momentum",
-            subtitle: "A practical overview for non-technical readers",
+            subtitle: "Mission, scale, and rollout status",
             assetName: "inside-asts-company",
             fallbackIcon: "building.2.crop.circle",
             fallbackTitle: "Add asset: inside-asts-company"
@@ -112,9 +126,9 @@ struct InsideASTSView: View {
         expandableCard(
             id: .satellites,
             title: "BlueBird Satellites: Block 1 and Block 2",
-            subtitle: "What changed, and why it matters",
+            subtitle: "Generation differences and capacity impact",
             assetName: "inside-asts-bluebird",
-            fallbackIcon: "satellite.fill",
+            fallbackIcon: "antenna.radiowaves.left.and.right",
             fallbackTitle: "Add asset: inside-asts-bluebird"
         ) {
             VStack(alignment: .leading, spacing: 10) {
@@ -138,8 +152,8 @@ struct InsideASTSView: View {
     private var appFlowCard: some View {
         expandableCard(
             id: .appFlow,
-            title: "How This App Works (High Level)",
-            subtitle: "From TLE text to live globe visuals",
+            title: "How the App Works",
+            subtitle: "From TLEs to live globe rendering",
             assetName: "inside-asts-appflow",
             fallbackIcon: "point.3.connected.trianglepath.dotted",
             fallbackTitle: "Add asset: inside-asts-appflow"
@@ -148,17 +162,6 @@ struct InsideASTSView: View {
                 ForEach(InsideASTSContent.processSteps) { step in
                     processStep(title: step.title, description: step.description)
                 }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(InsideASTSContent.coverageWorkflowTitle)
-                        .font(.subheadline.weight(.semibold))
-                    Text(InsideASTSContent.coverageWorkflowNote)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background { secondaryCardBackground(cornerRadius: 10) }
             }
         }
     }
@@ -168,7 +171,7 @@ struct InsideASTSView: View {
         expandableCard(
             id: .accuracy,
             title: "Accuracy, Limits, and Intent",
-            subtitle: "Important context for interpreting what you see",
+            subtitle: "What this model can and cannot provide",
             assetName: "inside-asts-accuracy",
             fallbackIcon: "scope",
             fallbackTitle: "Add asset: inside-asts-accuracy"
@@ -178,17 +181,11 @@ struct InsideASTSView: View {
                     bullet(item)
                 }
 
-                Text(InsideASTSContent.disclaimer)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(10)
-                    .background {
-                        secondaryCardBackground(cornerRadius: 10)
-                    }
+                educationalUseNotice(InsideASTSContent.disclaimer)
 
                 Text(InsideASTSContent.financeDisclaimer)
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(readableTertiaryTextColor)
             }
         }
     }
@@ -197,8 +194,8 @@ struct InsideASTSView: View {
     private var linksCard: some View {
         expandableCard(
             id: .links,
-            title: "Primary Sources",
-            subtitle: "Official references behind this page",
+            title: "Sources",
+            subtitle: "Primary references",
             assetName: nil,
             fallbackIcon: "link",
             fallbackTitle: ""
@@ -221,50 +218,70 @@ struct InsideASTSView: View {
         fallbackTitle: String,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let assetName {
-                featureImage(assetName: assetName, fallbackIcon: fallbackIcon, fallbackTitle: fallbackTitle)
-            }
+        let isExpanded = expandedSections.contains(id)
 
-            DisclosureGroup(
-                isExpanded: isExpandedBinding(for: id),
-                content: {
-                    content()
-                        .padding(.top, 4)
-                },
-                label: {
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                toggleSection(id)
+            } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: fallbackIcon)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.95))
+
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title)
-                            .font(.headline)
+                            .font(.system(.body, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.white)
                         Text(subtitle)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.82))
                     }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .padding(.top, 4)
                 }
-            )
-            .tint(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(BlueBirdHUDStyle.headerGradient)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+
+            Divider()
+                .overlay(.white.opacity(colorScheme == .dark ? 0.14 : 0.22))
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let assetName {
+                        featureImage(assetName: assetName, fallbackIcon: fallbackIcon, fallbackTitle: fallbackTitle)
+                    }
+
+                    content()
+                }
+                .padding(12)
+                // Keep expansion anchored below the header so content does not sweep across it.
+                .transition(.opacity)
+            }
         }
-        .padding(12)
-        .background { primaryCardBackground(cornerRadius: 16) }
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(cardBorderGradient, lineWidth: 1)
-        )
-        .shadow(color: cardShadowColor, radius: 4, x: 0, y: 2)
+        .blueBirdHUDCard(cornerRadius: 16, tint: Color(red: 0.04, green: 0.61, blue: 0.86))
     }
 
-    /// Binding helper that keeps the section expansion state in one place.
-    private func isExpandedBinding(for id: SectionID) -> Binding<Bool> {
-        Binding(
-            get: { expandedSections.contains(id) },
-            set: { isExpanded in
-                if isExpanded {
-                    expandedSections.insert(id)
-                } else {
-                    expandedSections.remove(id)
-                }
+    /// Toggles one section with a smooth transition for readability.
+    private func toggleSection(_ id: SectionID) {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            if expandedSections.contains(id) {
+                expandedSections.remove(id)
+            } else {
+                expandedSections.insert(id)
             }
-        )
+        }
     }
 
     /// Renders an image when available and a styled placeholder when missing.
@@ -309,7 +326,7 @@ struct InsideASTSView: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background { secondaryCardBackground(cornerRadius: 10) }
+        .blueBirdHUDInset(cornerRadius: 10)
     }
 
     /// Bullet row style that keeps explanatory text easy to scan.
@@ -321,7 +338,7 @@ struct InsideASTSView: View {
                 .padding(.top, 6)
             Text(text)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(readableSecondaryTextColor)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -333,11 +350,43 @@ struct InsideASTSView: View {
                 .font(.subheadline.weight(.semibold))
             Text(description)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(readableSecondaryTextColor)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background { secondaryCardBackground(cornerRadius: 10) }
+        .blueBirdHUDInset(cornerRadius: 10)
+    }
+
+    /// Highlights the educational-use disclaimer in a style that matches the HUD card system.
+    private func educationalUseNotice(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.95))
+                .frame(width: 20, height: 20)
+                .background(BlueBirdHUDStyle.headerGradient, in: Circle())
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Educational Use")
+                    .font(.caption2.weight(.semibold))
+                    .tracking(0.3)
+                    .textCase(.uppercase)
+                    .foregroundStyle(readableTertiaryTextColor)
+
+                Text(text)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(readableSecondaryTextColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .blueBirdHUDInset(cornerRadius: 10)
+        .blueBirdHUDGlass(
+            tint: Color(red: 0.04, green: 0.61, blue: 0.86).opacity(colorScheme == .dark ? 0.24 : 0.12),
+            cornerRadius: 10
+        )
     }
 
     /// Link row with an external-link icon for visual clarity.
@@ -347,10 +396,22 @@ struct InsideASTSView: View {
                 Link(destination: safeURL) {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.up.right.square")
+                            .font(.caption.weight(.semibold))
                         Text(title)
+                            .lineLimit(2)
+                        Spacer(minLength: 0)
                     }
                     .font(.subheadline)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .blueBirdHUDInset(cornerRadius: 10)
+                    .blueBirdHUDGlass(
+                        tint: Color(red: 0.03, green: 0.76, blue: 0.62).opacity(0.25),
+                        cornerRadius: 10,
+                        interactive: true
+                    )
                 }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -368,59 +429,16 @@ struct InsideASTSView: View {
         .ignoresSafeArea()
     }
 
-    /// Primary card background with adaptive material for light/dark modes.
-    @ViewBuilder
-    private func primaryCardBackground(cornerRadius: CGFloat) -> some View {
-        if colorScheme == .dark {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color.black.opacity(0.45))
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
-        } else {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color.white.opacity(0.7))
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
-        }
+    /// Higher-contrast secondary text improves readability in light mode on bright glass cards.
+    private var readableSecondaryTextColor: Color {
+        colorScheme == .dark ? .secondary : Color.black.opacity(0.78)
     }
 
-    /// Secondary inset background for bullets and process steps.
-    @ViewBuilder
-    private func secondaryCardBackground(cornerRadius: CGFloat) -> some View {
-        if colorScheme == .dark {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color.white.opacity(0.03))
-        } else {
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(Color.black.opacity(0.06))
-        }
+    /// Tertiary text is still de-emphasized but avoids becoming washed out in light mode.
+    private var readableTertiaryTextColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.62) : Color.black.opacity(0.62)
     }
 
-    /// Soft neon border that is stronger in dark mode and subtle in light mode.
-    private var cardBorderGradient: LinearGradient {
-        if colorScheme == .dark {
-            return LinearGradient(
-                colors: [
-                    .white.opacity(0.06),
-                    .cyan.opacity(0.08),
-                    .purple.opacity(0.05)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-        return LinearGradient(
-            colors: [
-                .black.opacity(0.08),
-                .cyan.opacity(0.05)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    /// Restrained glow tint so cards look layered without overpowering text.
-    private var cardShadowColor: Color {
-        colorScheme == .dark ? .cyan.opacity(0.015) : .cyan.opacity(0.008)
-    }
 }
 
 /// Preview for quickly validating the information tab layout in dark mode.
