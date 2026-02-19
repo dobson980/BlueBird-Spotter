@@ -142,8 +142,16 @@ struct GlobeView: View {
             viewModel.startTracking(queryKeys: queryKeys)
         }
         .onDisappear {
+            // Reset transient HUD state so returning to globe starts clean.
+            viewModel.dismissTransientPanels()
             // Cancels tracking to avoid background work when the tab is hidden.
             viewModel.stopTracking()
+        }
+        .onChange(of: navigationState.selectedTab) { _, selectedTab in
+            guard selectedTab != .globe else { return }
+            // Some tab transitions keep this view alive, so also clear overlays
+            // when globe is no longer the active destination.
+            viewModel.dismissTransientPanels()
         }
         .onChange(of: navigationState.focusRequest?.token) { _, _ in
             // Mirror focus requests into selection so the overlay/high detail stays in sync.

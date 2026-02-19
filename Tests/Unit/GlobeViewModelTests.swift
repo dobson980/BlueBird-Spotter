@@ -45,6 +45,17 @@ struct GlobeViewModelTests {
         #expect(viewModel.selectedSatelliteId == 12345)
     }
 
+    /// Confirms focus requests close settings so only one HUD panel is visible.
+    @Test @MainActor func syncSelection_closesSettingsPanel() {
+        let trackingViewModel = TrackingViewModel()
+        let viewModel = GlobeViewModel(trackingViewModel: trackingViewModel)
+        viewModel.isSettingsExpanded = true
+
+        viewModel.syncSelection(with: SatelliteFocusRequest(satelliteId: 12345, token: UUID()))
+
+        #expect(viewModel.isSettingsExpanded == false)
+    }
+
     /// Confirms selection lookup resolves the matching tracked satellite model.
     @Test @MainActor func selectedSatellite_returnsMatchingTrackedSatellite() {
         let trackingViewModel = TrackingViewModel()
@@ -69,5 +80,18 @@ struct GlobeViewModelTests {
         viewModel.selectedSatelliteId = 999
 
         #expect(viewModel.selectedSatellite == nil)
+    }
+
+    /// Confirms leaving globe clears both settings and selection overlays.
+    @Test @MainActor func dismissTransientPanels_clearsSelectionAndSettings() {
+        let trackingViewModel = TrackingViewModel()
+        let viewModel = GlobeViewModel(trackingViewModel: trackingViewModel)
+        viewModel.selectedSatelliteId = 42
+        viewModel.isSettingsExpanded = true
+
+        viewModel.dismissTransientPanels()
+
+        #expect(viewModel.selectedSatelliteId == nil)
+        #expect(viewModel.isSettingsExpanded == false)
     }
 }
