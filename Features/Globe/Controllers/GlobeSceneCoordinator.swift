@@ -22,12 +22,29 @@ final class GlobeSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
         case low
     }
 
+    /// Captures the work needed to build one orbit path off the main actor.
+    struct OrbitPathBuildRequest {
+        let signature: OrbitSignature
+        let satellite: Satellite
+    }
+
+    /// Snapshot of inputs reused while draining the orbit build queue.
+    struct OrbitPathBuildContext {
+        let referenceDate: Date
+        let sampleCount: Int
+        let altitudeOffsetKm: Double
+        let priority: TaskPriority
+        let generation: UInt64
+    }
+
     /// Category mask used for satellite hit testing.
     let satelliteCategoryMask = GlobeSceneView.satelliteCategoryMask
     /// Category mask used for orbital path visuals.
     let orbitPathCategoryMask = GlobeSceneView.orbitPathCategoryMask
     /// Limits how many orbit paths build concurrently to keep the UI responsive.
     static let maxConcurrentOrbitPathBuilds = 2
+    /// Short fade helps newly built paths feel intentional instead of popping in.
+    static let orbitPathFadeInDuration: TimeInterval = 0.22
 
     var satelliteNodes: [Int: SCNNode] = [:]
     var lastPositions: [Int: SCNVector3] = [:]
@@ -59,6 +76,16 @@ final class GlobeSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
     var orbitPathNodes: [OrbitSignature: SCNNode] = [:]
     /// In-flight orbit path build tasks.
     var orbitPathTasks: [OrbitSignature: Task<[SIMD3<Float>], Never>] = [:]
+    /// FIFO queue of signatures waiting for background path generation.
+    var orbitPathBuildQueue: [OrbitPathBuildRequest] = []
+    /// Tracks queued signatures so repeated SwiftUI updates do not enqueue duplicates.
+    var queuedOrbitPathSignatures: Set<OrbitSignature> = []
+    /// Tracks the signatures that should currently exist for the active path mode.
+    var desiredOrbitPathSignatures: Set<OrbitSignature> = []
+    /// Stores the latest build context used when launching queued background tasks.
+    var orbitPathBuildContext: OrbitPathBuildContext?
+    /// Monotonic token that invalidates stale task completions after full rebuilds.
+    var orbitPathBuildGeneration: UInt64 = 0
     /// Remembers the last orbit path config to refresh when settings change.
     var lastOrbitPathConfig: OrbitPathConfig?
     /// Remembers the active sample count so we can rebuild when it changes.
