@@ -69,7 +69,7 @@ final class TrackingViewModel {
                     repository: repository,
                     queryKeys: normalizedQueryKeys
                 )
-                await self.prepareForTracking(latestFetchedAt: seed.latestFetchedAt)
+                self.prepareForTracking(latestFetchedAt: seed.latestFetchedAt)
 
                 await Self.runTrackingLoop(
                     satellites: seed.satellites,
@@ -82,9 +82,9 @@ final class TrackingViewModel {
             } catch is CancellationError {
                 // Cancellation is expected when the view disappears or refresh restarts.
             } catch let error as CelesTrakError {
-                await self.handleTrackingFailure(message: error.localizedDescription)
+                self.handleTrackingFailure(message: error.localizedDescription)
             } catch {
-                await self.handleTrackingFailure(message: "An unexpected error occurred: \(error)")
+                self.handleTrackingFailure(message: "An unexpected error occurred: \(error)")
             }
         }
     }
