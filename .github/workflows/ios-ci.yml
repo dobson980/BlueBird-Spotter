@@ -101,32 +101,6 @@ jobs:
           echo "SIMULATOR_ID=${simulator_id}" >> "$GITHUB_ENV"
           echo "Using simulator id: ${simulator_id}"
 
-      - name: Boot Selected Simulator
-        timeout-minutes: 4
-        run: |
-          set -euo pipefail
-
-          # Pre-boot the chosen simulator to reduce test startup latency.
-          # Do not block forever here; if boot does not complete quickly we
-          # continue and let `xcodebuild` report a destination error directly.
-          xcrun simctl boot "$SIMULATOR_ID" || true
-
-          booted=0
-          for _ in {1..24}; do
-            if xcrun simctl list devices | grep -E "$SIMULATOR_ID \\(Booted\\)" >/dev/null; then
-              booted=1
-              break
-            fi
-            sleep 5
-          done
-
-          if [ "$booted" -eq 1 ]; then
-            echo "Simulator booted: $SIMULATOR_ID"
-          else
-            echo "::warning::Simulator did not report Booted within 120s; continuing to xcodebuild."
-            xcrun simctl list devices | grep "$SIMULATOR_ID" || true
-          fi
-
       - name: Run Unit Tests
         timeout-minutes: 25
         run: |
