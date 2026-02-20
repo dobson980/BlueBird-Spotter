@@ -134,17 +134,20 @@ private struct GlobeDebugRenderControlsPreviewHost: View {
                 satelliteYawFollowsOrbit = true
             }
         )
+        .frame(width: 320, alignment: .leading)
         .padding()
+        // A solid backdrop makes thin-material controls readable in the preview canvas.
+        .background(Color.black)
     }
 }
 
 /// Preview for tuning slider and toggle layout in the debug controls panel.
-#Preview("Render Controls") {
+#Preview("Render Controls", traits: .sizeThatFitsLayout) {
     GlobeDebugRenderControlsPreviewHost()
 }
 
 /// Preview for validating populated render diagnostics.
-#Preview("Stats Populated") {
+#Preview("Stats Populated", traits: .sizeThatFitsLayout) {
     GlobeDebugStatsOverlay(
         trackedCount: 2,
         renderStats: GlobeRenderStats(
@@ -159,14 +162,18 @@ private struct GlobeDebugRenderControlsPreviewHost: View {
             isSimulator: true
         )
     )
+    .frame(width: 220, alignment: .leading)
     .padding()
+    .background(Color.black)
 }
 
 /// Preview for validating empty diagnostics fallback values.
-#Preview("Stats Empty") {
+#Preview("Stats Empty", traits: .sizeThatFitsLayout) {
     GlobeDebugStatsOverlay(
         trackedCount: 0,
         renderStats: nil
     )
+    .frame(width: 220, alignment: .leading)
     .padding()
+    .background(Color.black)
 }

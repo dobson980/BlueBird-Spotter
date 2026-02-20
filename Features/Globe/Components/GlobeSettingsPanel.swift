@@ -280,6 +280,67 @@ struct GlobeSettingsPanel: View {
     }
 }
 
+/// Preview for validating default panel hierarchy and control spacing.
+#Preview("Default") {
+    GlobeSettingsPanelPreviewHost()
+        .padding()
+        .frame(maxWidth: 420, maxHeight: .infinity, alignment: .topTrailing)
+        .background(Color.black)
+}
+
+/// Preview for validating selected color/toggle states in dark appearance.
+#Preview("Dark - Customized") {
+    GlobeSettingsPanelPreviewHost(
+        appAppearanceMode: .dark,
+        directionalLightEnabled: false,
+        coverageMode: .all,
+        orbitPathMode: .all,
+        orbitPathThickness: 0.012,
+        orbitPathColorId: "magenta"
+    )
+    .padding()
+    .frame(maxWidth: 420, maxHeight: .infinity, alignment: .topTrailing)
+    .background(Color.black)
+    .preferredColorScheme(.dark)
+}
+
+private struct GlobeSettingsPanelPreviewHost: View {
+    /// Local state mirrors real binding-backed settings behavior in canvas previews.
+    @State private var appAppearanceMode: AppAppearanceMode
+    @State private var directionalLightEnabled: Bool
+    @State private var coverageMode: CoverageFootprintMode
+    @State private var orbitPathMode: OrbitPathMode
+    @State private var orbitPathThickness: Double
+    @State private var orbitPathColorId: String
+
+    init(
+        appAppearanceMode: AppAppearanceMode = .system,
+        directionalLightEnabled: Bool = true,
+        coverageMode: CoverageFootprintMode = .selectedOnly,
+        orbitPathMode: OrbitPathMode = .selectedOnly,
+        orbitPathThickness: Double = 0.004,
+        orbitPathColorId: String = OrbitPathColorOption.defaultId
+    ) {
+        _appAppearanceMode = State(initialValue: appAppearanceMode)
+        _directionalLightEnabled = State(initialValue: directionalLightEnabled)
+        _coverageMode = State(initialValue: coverageMode)
+        _orbitPathMode = State(initialValue: orbitPathMode)
+        _orbitPathThickness = State(initialValue: orbitPathThickness)
+        _orbitPathColorId = State(initialValue: orbitPathColorId)
+    }
+
+    var body: some View {
+        GlobeSettingsPanel(
+            appAppearanceMode: $appAppearanceMode,
+            directionalLightEnabled: $directionalLightEnabled,
+            coverageMode: $coverageMode,
+            orbitPathMode: $orbitPathMode,
+            orbitPathThickness: $orbitPathThickness,
+            orbitPathColorId: $orbitPathColorId
+        )
+    }
+}
+
 private extension View {
     /// Applies Liquid Glass when available and keeps a no-op fallback for non-26 runtimes.
     @ViewBuilder

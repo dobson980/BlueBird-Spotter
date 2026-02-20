@@ -117,3 +117,52 @@ extension View {
         }
     }
 }
+
+/// Preview host for validating shared HUD card and inset style tokens.
+private struct BlueBirdHUDStylePreviewHost: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.95))
+                Text("BlueBird HUD Style")
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.white)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(BlueBirdHUDStyle.headerGradient)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Inset Surface")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("Shared style preview for card and inset appearance.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .blueBirdHUDInset(cornerRadius: 10)
+        }
+        .padding(12)
+        .frame(width: 320, alignment: .leading)
+        .blueBirdHUDCard(cornerRadius: 16, tint: Color(red: 0.04, green: 0.61, blue: 0.86))
+        .padding()
+        .background(Color.black)
+    }
+}
+
+/// Preview for validating shared HUD style in dark appearance.
+#Preview("HUD Style - Dark", traits: .sizeThatFitsLayout) {
+    BlueBirdHUDStylePreviewHost()
+        .preferredColorScheme(.dark)
+}
+
+/// Preview for validating shared HUD style in light appearance.
+#Preview("HUD Style - Light", traits: .sizeThatFitsLayout) {
+    BlueBirdHUDStylePreviewHost()
+        .preferredColorScheme(.light)
+}

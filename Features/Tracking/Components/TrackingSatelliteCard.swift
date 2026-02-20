@@ -95,6 +95,8 @@ struct TrackingSatelliteCard: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Prevent unconstrained parents (like some preview/device canvases) from stretching the row vertically.
+        .fixedSize(horizontal: false, vertical: true)
         .blueBirdHUDInset(cornerRadius: 10)
     }
 
@@ -121,6 +123,8 @@ struct TrackingSatelliteCard: View {
         }
         .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Keep dense fallback rows content-sized so previews reflect real list card height.
+        .fixedSize(horizontal: false, vertical: true)
         .blueBirdHUDInset(cornerRadius: 10)
     }
 
@@ -268,5 +272,45 @@ struct TrackingSatelliteCard: View {
         }
         let magnitude = abs(value).formatted(.number.precision(.fractionLength(1)))
         return "\(direction) \(magnitude)°"
+    }
+}
+
+/// Preview for validating card spacing and dense telemetry formatting.
+#Preview("Telemetry", traits: .sizeThatFitsLayout) {
+    TrackingSatelliteCard(tracked: .preview)
+        .frame(width: 360, alignment: .leading)
+        .padding()
+        .background(Color.black)
+}
+
+/// Preview for checking divider and text contrast in dark mode.
+#Preview("Telemetry Dark", traits: .sizeThatFitsLayout) {
+    TrackingSatelliteCard(tracked: .preview)
+        .frame(width: 360, alignment: .leading)
+        .padding()
+        .background(Color.black)
+        .preferredColorScheme(.dark)
+}
+
+private extension TrackedSatellite {
+    /// Shared sample satellite data for row-level preview rendering.
+    static var preview: TrackedSatellite {
+        let now = Date()
+        return TrackedSatellite(
+            satellite: Satellite(
+                id: 62620,
+                name: "BLUEBIRD-2",
+                tleLine1: "1 62620U 25001A   26049.19876543  .00001234  00000-0  10270-3 0  9990",
+                tleLine2: "2 62620  51.6431  21.2862 0007417  92.3844  10.1234 15.48912345123456",
+                epoch: now
+            ),
+            position: SatellitePosition(
+                timestamp: now,
+                latitudeDegrees: 32.7789,
+                longitudeDegrees: -96.8089,
+                altitudeKm: 549.8,
+                velocityKmPerSec: SIMD3(2.2, -6.3, 3.4)
+            )
+        )
     }
 }
