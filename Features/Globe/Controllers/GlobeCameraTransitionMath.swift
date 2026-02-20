@@ -111,14 +111,22 @@ enum GlobeCameraTransitionMath {
         let distanceDelta = abs(clampedTargetDistance - clampedStartDistance)
         let zoomDeltaDuration = min(0.55, distanceDelta * 0.24)
         let baseTransitionDuration = baseDuration + zoomDeltaDuration
-        // Focus transitions intentionally run 40% longer to reduce perceived zoom snap.
-        // Reset-home timing remains unchanged so double-tap recenters still feel responsive.
-        let durationScale: Float = {
+        // Scale timing by zoom delta so "pan then focus" transitions do not end with
+        // a brief zoom pop. Larger zoom changes start zooming earlier and run longer.
+        let zoomInfluence = simd_clamp(distanceDelta / 2.0, 0, 1)
+        // Reset-home timing remains unchanged so double-tap recentering stays responsive.
+        let timing: (durationScale: Float, rotationPhase: Float) = {
             switch kind {
             case .focus:
-                return 1.4
+                return (
+                    durationScale: 1.45 + (0.25 * zoomInfluence),
+                    rotationPhase: 0.86 - (0.16 * zoomInfluence)
+                )
             case .resetHome:
-                return 1.0
+                return (
+                    durationScale: 1.0,
+                    rotationPhase: 0.9
+                )
             }
         }()
 
@@ -128,8 +136,8 @@ enum GlobeCameraTransitionMath {
             startDistance: clampedStartDistance,
             targetDirection: clampedTargetDirection,
             targetDistance: clampedTargetDistance,
-            duration: baseTransitionDuration * durationScale,
-            rotationPhase: 0.9,
+            duration: baseTransitionDuration * timing.durationScale,
+            rotationPhase: timing.rotationPhase,
             elapsed: 0
         )
     }

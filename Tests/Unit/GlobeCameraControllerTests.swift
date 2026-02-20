@@ -87,6 +87,24 @@ struct GlobeCameraControllerTests {
         #expect(nearlyAligned(fixture.controller.state.direction, fixture.store.directions[1] ?? simd_float3(0, 0, 1), minimumDot: 0.995))
     }
 
+    /// Focus transitions should begin zooming before the final tail of the timeline.
+    @Test @MainActor func focusTransition_standardZoomDelta_startsZoomEarlierThanLegacyPhase() {
+        let fixture = makeControllerFixture()
+        // Same direction isolates zoom timing from orbital rotation so this test
+        // only validates transition pacing changes.
+        fixture.store.directions[77] = simd_float3(0, 0, 1)
+
+        let accepted = fixture.controller.requestFocus(satelliteId: 77, token: UUID())
+        #expect(accepted)
+        guard let transition = fixture.controller.state.transition else {
+            #expect(Bool(false), "Expected a focus transition to start.")
+            return
+        }
+
+        #expect(transition.rotationPhase < 0.85)
+        #expect(transition.duration > 1.45)
+    }
+
     /// Pinch zoom during follow should persist instead of snapping back to entry zoom.
     @Test @MainActor func following_pinchChangesDistance_distancePersistsAcrossTicks() {
         let fixture = makeControllerFixture()
