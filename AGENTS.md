@@ -13,6 +13,7 @@ The priorities are: correctness, readability, maintainability, and “open-sourc
 - **No build/test artifacts in the repo.** Write DerivedData and xcresult bundles to **$TMPDIR**.
 - **Commenting is mandatory.** When you change or create files, follow **Section 6 — Commenting Guidelines**.
 - **Keep Testing Guidelines current.** If tests are added/moved/changed, update **Section 4** accordingly.
+- **SwiftUI preview coverage is required.** Every `View` in `App/`, `Features/**/Views`, `Features/**/Components`, and `Core/UI/Components` must include at least one `#Preview` in the same file.
 - **Platforms:** This project targets **iOS** and **macOS 26+** (SwiftUI).  
   - Do not remove support for either platform without explicit instruction.
 - **Services folder stays top-level.** Keep a repository-root folder named **`Services/`**.
@@ -148,6 +149,7 @@ The priorities are: correctness, readability, maintainability, and open-source f
 - **No build/test artifacts in the repo.** Write DerivedData and xcresult bundles to **$TMPDIR**.
 - **Commenting is mandatory.** When you change or create files, follow **Section 6 — Commenting Guidelines**.
 - **Keep Testing Guidelines current.** If tests are added, moved, renamed, or frameworks change, update **Section 4**.
+- **SwiftUI preview coverage is required.** Every `View` in `App/`, `Features/**/Views`, `Features/**/Components`, and `Core/UI/Components` must include at least one `#Preview` in the same file.
 - **Platforms:** This project targets **iOS** and **macOS 26+** (SwiftUI).
   - Do not remove support for either platform without explicit instruction.
 - **Services folder stays top-level.** Keep a repository-root folder named **`Services/`**.
@@ -508,5 +510,23 @@ Ensure a LICENSE exists, or note that licensing is pending.
 
 - Allowed dependency: SatelliteKit via SPM version 2.1.1.
 - Do not add new dependencies without explicit approval.
+
+---
+
+## 11) SwiftUI Preview Coverage
+
+- Every SwiftUI `View` in:
+  - `App/`
+  - `Features/**/Views`
+  - `Features/**/Components`
+  - `Core/UI/Components`
+  must include at least one `#Preview` in the same file.
+- Add at least one "realistic state" preview for every screen-level view and reusable component.
+- For binding-heavy views, use a small preview harness (`@State`) instead of `.constant(...)` when interactivity matters.
+- Preview data must be deterministic and local:
+  - no network calls
+  - no disk reads/writes
+  - no long-running timers/tasks
+- When a view supports multiple meaningful states (for example: loading/error/loaded or light/dark), include multiple named previews.
 
 ---

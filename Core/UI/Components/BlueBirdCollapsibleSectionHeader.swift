@@ -83,3 +83,25 @@ struct BlueBirdCollapsibleSectionHeader: View {
         count == 1 ? "1 satellite" : "\(count) satellites"
     }
 }
+
+/// Preview for validating collapsed and expanded chevron behavior.
+#Preview("Interactive Header") {
+    BlueBirdCollapsibleSectionHeaderPreviewHost()
+        .padding()
+        .background(Color.black)
+}
+
+private struct BlueBirdCollapsibleSectionHeaderPreviewHost: View {
+    /// Local preview state mirrors how parent views toggle collapsed sections.
+    @State private var isCollapsed = false
+
+    var body: some View {
+        BlueBirdCollapsibleSectionHeader(
+            title: "BlueBird",
+            count: 3,
+            isCollapsed: isCollapsed
+        ) {
+            isCollapsed.toggle()
+        }
+    }
+}

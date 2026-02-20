@@ -103,3 +103,29 @@ struct TLESatelliteCard: View {
         .background(.white.opacity(0.16), in: Capsule())
     }
 }
+
+/// Preview for validating card typography and horizontal line scrolling.
+#Preview("Default") {
+    TLESatelliteCard(tle: .preview)
+        .padding()
+        .background(Color.black)
+}
+
+/// Preview for checking contrast and divider behavior in dark appearance.
+#Preview("Dark") {
+    TLESatelliteCard(tle: .preview)
+        .padding()
+        .background(Color.black)
+        .preferredColorScheme(.dark)
+}
+
+private extension TLE {
+    /// Shared sample entry so card previews stay deterministic.
+    static var preview: TLE {
+        TLE(
+            name: "BLUEWALKER 3",
+            line1: "1 53807U 22094A   26049.33159722  .00001214  00000-0  11117-3 0  9990",
+            line2: "2 53807  53.0491 190.1207 0001653 126.1334 233.9839 15.06331429189741"
+        )
+    }
+}
