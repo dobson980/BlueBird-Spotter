@@ -46,6 +46,33 @@ jobs:
         run: |
           set -euo pipefail
 
+          wait_for_bootstatus_with_timeout() {
+            local simulator_id="$1"
+            local timeout_seconds="$2"
+
+            xcrun simctl bootstatus "${simulator_id}" -b &
+            local bootstatus_pid=$!
+            local started_at
+            started_at="$(date +%s)"
+
+            while kill -0 "${bootstatus_pid}" 2>/dev/null; do
+              local now elapsed
+              now="$(date +%s)"
+              elapsed="$((now - started_at))"
+              if [ "${elapsed}" -ge "${timeout_seconds}" ]; then
+                echo "Timed out waiting for simulator ${simulator_id} to finish booting after ${timeout_seconds}s."
+                kill -TERM "${bootstatus_pid}" 2>/dev/null || true
+                sleep 2
+                kill -KILL "${bootstatus_pid}" 2>/dev/null || true
+                wait "${bootstatus_pid}" 2>/dev/null || true
+                return 124
+              fi
+              sleep 2
+            done
+
+            wait "${bootstatus_pid}"
+          }
+
           runtime_id="$(
             xcrun simctl list runtimes available | \
             awk -F ' - ' '
@@ -84,12 +111,42 @@ jobs:
             exit 1
           fi
 
-          simulator_name="BlueBird Spotter CI ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          simulator_id="$(xcrun simctl create "${simulator_name}" "${device_type_id}" "${runtime_id}")"
+          max_boot_attempts=3
+          boot_timeout_seconds=240
+          simulator_id=""
+          simulator_name=""
 
-          # Boot and wait to avoid xcodebuild stalling while CoreSimulator starts.
-          xcrun simctl boot "${simulator_id}" || true
-          xcrun simctl bootstatus "${simulator_id}" -b
+          for attempt in $(seq 1 "${max_boot_attempts}"); do
+            simulator_name="BlueBird Spotter CI ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${attempt}"
+            simulator_id="$(xcrun simctl create "${simulator_name}" "${device_type_id}" "${runtime_id}")"
+            echo "Boot attempt ${attempt}/${max_boot_attempts} with simulator ${simulator_id}."
+
+            xcrun simctl boot "${simulator_id}" || true
+
+            if wait_for_bootstatus_with_timeout "${simulator_id}" "${boot_timeout_seconds}"; then
+              echo "Simulator booted successfully on attempt ${attempt}."
+              break
+            fi
+
+            echo "Simulator failed to boot on attempt ${attempt}. Collecting diagnostics and retrying..."
+            xcrun simctl list devices available || true
+            xcrun simctl list devices unavailable || true
+            xcrun simctl shutdown "${simulator_id}" || true
+            xcrun simctl delete "${simulator_id}" || true
+
+            # CoreSimulator can become unhealthy on hosted runners; restart services before retry.
+            killall -9 Simulator 2>/dev/null || true
+            killall -9 com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null || true
+            xcrun simctl shutdown all || true
+
+            simulator_id=""
+            simulator_name=""
+          done
+
+          if [ -z "${simulator_id}" ]; then
+            echo "Unable to boot a dedicated simulator after ${max_boot_attempts} attempts."
+            exit 1
+          fi
 
           echo "SIMULATOR_ID=${simulator_id}" >> "$GITHUB_ENV"
           echo "SIMULATOR_NAME=${simulator_name}" >> "$GITHUB_ENV"
